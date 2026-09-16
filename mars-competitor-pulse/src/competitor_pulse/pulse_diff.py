@@ -44,6 +44,13 @@ def default_watchlist() -> list[dict[str, Any]]:
     return []
 
 
+def spacexai_watchlist() -> list[dict[str, Any]]:
+    path = default_fixture_dir() / "watchlist_spacexai.json"
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return []
+
+
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

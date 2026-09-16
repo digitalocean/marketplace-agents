@@ -1,0 +1,49 @@
+[
+  {
+    "name": "OpenAI",
+    "urls": {
+      "site": "https://openai.com/",
+      "pricing": "https://openai.com/api/pricing/",
+      "changelog": "https://openai.com/blog/",
+      "careers": "https://openai.com/careers/"
+    }
+  },
+  {
+    "name": "Anthropic",
+    "urls": {
+      "site": "https://www.anthropic.com/",
+      "pricing": "https://www.anthropic.com/pricing",
+      "changelog": "https://www.anthropic.com/news",
+      "careers": "https://www.anthropic.com/careers"
+    }
+  },
+  {
+    "name": "Google AI",
+    "urls": {
+      "site": "https://ai.google/",
+      "pricing": "https://ai.google/pricing/",
+      "blog": "https://blog.google/technology/ai/"
+    }
+  },
+  {
+    "name": "Google DeepMind",
+    "urls": {
+      "site": "https://deepmind.google/",
+      "blog": "https://deepmind.google/discover/blog/"
+    }
+  },
+  {
+    "name": "Perplexity",
+    "urls": {
+      "site": "https://www.perplexity.ai/",
+      "pricing": "https://www.perplexity.ai/pro"
+    }
+  },
+  {
+    "name": "Microsoft Copilot",
+    "urls": {
+      "site": "https://www.microsoft.com/en-us/microsoft-copilot",
+      "pricing": "https://www.microsoft.com/en-us/microsoft-365/business/compare-all-microsoft-365-business-products"
+    }
+  }
+]
