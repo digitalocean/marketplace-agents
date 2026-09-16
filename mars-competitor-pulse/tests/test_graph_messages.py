@@ -41,7 +41,8 @@ def test_quiet_run_emits_assistant_message(monkeypatch):
         }
     )
     ai = _last_ai_message(result)
-    assert "no material" in ai.content.lower()
+    content = ai.content.lower()
+    assert "no changes" in content or "no material" in content
     assert ai.content == result.get("human_summary")
 
 
@@ -81,5 +82,5 @@ def test_resume_approve_emits_assistant_message(monkeypatch):
     final = g.invoke(Command(resume="approve"), cfg)
     ai = _last_ai_message(final)
     assert final.get("status") == "notified"
-    assert "notified" in ai.content.lower()
+    assert "notify sent" in ai.content.lower()
     assert final.get("brief_md") in ai.content

@@ -17,6 +17,10 @@ class PulseState(TypedDict, total=False):
     # MARS chat passes messages; intake parses JSON from HumanMessage
     messages: Annotated[list[AnyMessage], add_messages]
 
+    # Chat / intake (tests and legacy invoke)
+    user_message: str
+    chat_ack: str
+
     # Intake
     watchlist: list[dict[str, Any]]
     notify: bool
@@ -38,6 +42,8 @@ class PulseState(TypedDict, total=False):
 
     # Analyze
     deltas: list[dict[str, Any]]
+    baseline_captures: list[dict[str, Any]]
+    first_run: bool
     material: bool
 
     # Draft
@@ -56,7 +62,7 @@ class PulseState(TypedDict, total=False):
     baseline_updated: bool
 
     # Report
-    status: str  # empty | notified | denied | blocked | error | ok
+    status: str  # empty | notified | denied | blocked | error | ok | baseline
     human_summary: str
     stage_summaries: list[str]
     artifacts: list[str]
