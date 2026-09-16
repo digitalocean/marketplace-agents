@@ -28,3 +28,7 @@ permissions:
 ```
 
 Each subdirectory `langgraph.json` registers the graph as **`agent`** (required by the harness invoke path). Install deps via that subdir’s `requirements.txt` (includes `-e .`).
+
+## Monorepo install note
+
+MARS installs `requirements.txt` with the **repository root** as the working directory (even when `FRAMEWORK_SUBDIR` is set). Each agent’s `requirements.txt` therefore uses `-e ./mars-<agent>/` (path relative to repo root), not bare `-e .`.
