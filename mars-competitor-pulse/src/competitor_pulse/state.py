@@ -14,6 +14,7 @@ class WatchItem(TypedDict, total=False):
 
 
 class PulseState(TypedDict, total=False):
+    # MARS chat passes messages; intake parses JSON from HumanMessage
     messages: Annotated[list[AnyMessage], add_messages]
 
     # Intake

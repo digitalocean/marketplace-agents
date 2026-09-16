@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from competitor_pulse.pulse_diff import (
     allow_network,
@@ -19,6 +21,7 @@ from competitor_pulse.pulse_diff import (
     load_baseline,
     load_fixture_snapshot,
     modules_from_watchlist,
+    spacexai_watchlist,
 )
 from competitor_pulse.state import PulseState
 
@@ -55,6 +58,97 @@ def _assistant_reply(summary: str, brief_md: str | None = None) -> dict[str, Any
     return {"messages": [AIMessage(content=content)]}
 
 
+def _human_message_text(messages: list[Any] | None) -> str:
+    for msg in reversed(messages or []):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+        if isinstance(msg, dict):
+            role = (msg.get("type") or msg.get("role") or "").lower()
+            if role in {"human", "user"}:
+                return str(msg.get("content") or "")
+    return ""
+
+
+def _parse_intake_json(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    fence = re.search(
+        r"```(?:json)?\s*\n?(.*?)\n?```",
+        stripped,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if fence:
+        try:
+            parsed = json.loads(fence.group(1).strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    brace = re.search(r"\{.*\}", stripped, re.DOTALL)
+    if brace:
+        try:
+            parsed = json.loads(brace.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _apply_intake_overlay(state: PulseState, payload: dict[str, Any]) -> dict[str, Any]:
+    """Overlay JSON keys onto intake fields when state lacks them."""
+    out: dict[str, Any] = {}
+
+    state_watchlist = list(state.get("watchlist") or [])
+    payload_watchlist = payload.get("watchlist")
+    if not state_watchlist and isinstance(payload_watchlist, list) and payload_watchlist:
+        out["watchlist"] = payload_watchlist
+
+    if "notify" not in state and "notify" in payload:
+        out["notify"] = bool(payload.get("notify"))
+
+    if "allow_net" not in state and "allow_net" in payload:
+        out["allow_net"] = bool(payload.get("allow_net"))
+
+    state_channel = (state.get("channel") or "").strip()
+    payload_channel = payload.get("channel")
+    if not state_channel and isinstance(payload_channel, str) and payload_channel.strip():
+        out["channel"] = payload_channel.strip()
+
+    if "preset" in payload:
+        out["preset"] = str(payload.get("preset") or "").strip()
+
+    return out
+
+
+def _resolve_watchlist(
+    state: PulseState,
+    overlay: dict[str, Any],
+    human_text: str,
+) -> list[dict[str, Any]]:
+    watchlist = list(overlay.get("watchlist") or state.get("watchlist") or [])
+    if watchlist:
+        return watchlist
+
+    preset = (overlay.get("preset") or "").strip().lower()
+    if preset == "spacexai" or "SPACEXAI_PRESET" in human_text:
+        return spacexai_watchlist()
+
+    return default_watchlist()
+
+
 # ---------------------------------------------------------------------------
 # intake
 # ---------------------------------------------------------------------------
@@ -75,12 +169,18 @@ def intake(state: PulseState) -> dict[str, Any]:
             "skipped": False,
         }
 
-    watchlist = list(state.get("watchlist") or [])
-    if not watchlist:
-        watchlist = default_watchlist()
+    human_text = _human_message_text(state.get("messages"))
+    intake_json = _parse_intake_json(human_text)
+    overlay = _apply_intake_overlay(state, intake_json or {})
 
-    notify = bool(state.get("notify"))
-    channel = (state.get("channel") or "slack").strip() or "slack"
+    watchlist = _resolve_watchlist(state, overlay, human_text)
+
+    notify = bool(overlay.get("notify")) if "notify" in overlay else bool(state.get("notify"))
+    channel = (
+        overlay.get("channel")
+        or (state.get("channel") or "slack").strip()
+        or "slack"
+    )
     fixture_dir = (state.get("fixture_dir") or "").strip() or str(
         default_fixture_dir()
     )
@@ -90,11 +190,12 @@ def intake(state: PulseState) -> dict[str, Any]:
     snapshot_dir = (state.get("snapshot_dir") or "").strip() or str(
         default_snapshot_dir()
     )
-    allow_net = (
-        bool(state.get("allow_net"))
-        if "allow_net" in state
-        else allow_network()
-    )
+    if "allow_net" in overlay:
+        allow_net = bool(overlay.get("allow_net"))
+    elif "allow_net" in state:
+        allow_net = bool(state.get("allow_net"))
+    else:
+        allow_net = allow_network()
 
     n = len(watchlist)
     summary = f"Pulse for {n} competitor{'s' if n != 1 else ''}."
