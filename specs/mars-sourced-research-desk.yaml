@@ -1,0 +1,15 @@
+name: mars-sourced-research-desk
+agent: langgraph
+template: langgraph
+size: mv-2vcpu-4gb
+persistent_workspace: true
+env:
+  FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"
+  FRAMEWORK_REPO_SHA: "<exact-commit-sha>"
+  FRAMEWORK_SUBDIR: "mars-sourced-research-desk"
+  HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
+  HARNESS_INFERENCE_MODEL: deepseek-v4-pro
+secrets:
+  HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+permissions:
+  default: ask

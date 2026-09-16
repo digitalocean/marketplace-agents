@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    ".",
+    "langchain_openai",
+    "httpx"
+  ],
+  "graphs": {
+    "agent": "./src/sourced_research_desk/graph.py:graph"
+  }
+}

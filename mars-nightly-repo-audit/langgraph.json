@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    ".",
+    "langchain_openai"
+  ],
+  "graphs": {
+    "agent": "./src/nightly_repo_audit/graph.py:graph"
+  }
+}
