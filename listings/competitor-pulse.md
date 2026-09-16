@@ -31,15 +31,22 @@
 
 ## Getting Started
 
-Repo path on this machine:
+**In MARS chat, just name the companies** — no JSON paste required.
+
+| Example prompt | Result |
+|----------------|--------|
+| `Track OpenAI, Anthropic, and Google for SpaceXAI` | Offline alias map → public URLs for each |
+| `Pulse on Cursor and Perplexity` | Two-company watchlist |
+| `Track Cursor and alert on Slack` | Cursor + notify gate enabled |
+
+Known AI vendor aliases resolve offline. With harness inference configured, the agent can extract less common names via LLM. If you ask to track companies it cannot resolve, it asks you to name specific competitors (no silent Acme fallback). `hi` / `run` still loads the fixture watchlist for smoke.
+
+Optional power-user paths: fenced JSON with `watchlist`, or `{"preset": "spacexai"}`.
+
+**Local install and test** (fixtures offline):
 
 ```bash
-cd /home/box/Shop/mars-top3-agents/mars-competitor-pulse
-```
-
-Install, test, smoke (fixtures offline):
-
-```bash
+cd mars-competitor-pulse
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
@@ -57,9 +64,7 @@ export HARNESS_INFERENCE_API_KEY=...
 export ALLOW_NET=1
 ```
 
-**Smoke input (material + notify; expect ask):** watchlist entry + `"notify": true` + `"channel": "slack"` — see README JSON example.
-
-**Quiet path (no ask):** `"notify": true` with `baseline_path` pointing at a quiet fixture baseline.
+**Smoke:** chat prompts above, or `ALLOW_NET=0 python scripts/smoke_invoke.py` for fixture path. **Quiet path (no ask):** `notify: true` + quiet `baseline_path` — see README.
 
 Expect: stages through `draft`; ask only on material + notify; Approve → stub notify; Deny → `status: denied`, brief kept.
 

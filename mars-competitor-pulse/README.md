@@ -2,9 +2,41 @@
 
 Watchlist → public-web fetch modules → baseline diff → counterposition brief → ask before notify. LangGraph agent shaped for DigitalOcean MARS (Managed Agents / Harness Runtime).
 
+## Getting started (MARS chat)
+
+Start a chat and name the companies you want to track in plain English — no JSON or presets required.
+
+**Examples**
+
+| What you type | What happens |
+|---------------|--------------|
+| `Track OpenAI, Anthropic, and Google for SpaceXAI` | Resolves OpenAI, Anthropic, and Google AI with public marketing URLs |
+| `Pulse on Cursor and Perplexity` | Tracks Cursor and Perplexity |
+| `Track Cursor and alert on Slack` | Tracks Cursor; sets `notify=true` for the approval gate |
+| `hi` or `run` | Uses the Acme/BetaCo fixture watchlist (smoke / backward-compat) |
+
+**How intake works**
+
+1. If `watchlist` is already in run state, it is kept.
+2. Otherwise the latest chat message is parsed:
+   - **Known aliases** (OpenAI, Anthropic, Google/Gemini/DeepMind, Perplexity, Microsoft Copilot, xAI/Grok, Cursor, Meta/Llama, Mistral, Cohere, Amazon Bedrock/Q, Apple Intelligence, …) resolve **offline** to a watchlist with public HTTPS URLs.
+   - With **harness inference** configured (`HARNESS_INFERENCE_API_KEY` or `OPENAI_API_KEY`), an LLM pass can extract less common company names and best-effort URLs.
+   - An **explicit tracking request** that names no resolvable companies (e.g. `Track FooBar and BazQuux`) returns **blocked** with a prompt to name specific competitors — it does **not** silently fall back to Acme fixtures.
+   - **Generic or empty** messages (`hi`, `run`, no companies) still use the fixture watchlist for smoke and tests.
+
+**Defaults from chat**
+
+- `notify=false` unless you mention notify, alert, or Slack.
+- `allow_net=true` for NL-derived watchlists (live public pages). Tests and smoke pass `allow_net: false` explicitly.
+
+**Power users (optional)**
+
+- Fenced or raw JSON with `watchlist`, `notify`, `allow_net`, `channel`
+- `{"preset": "spacexai"}` or the `SPACEXAI_PRESET` token for the bundled SpaceXAI competitor set
+
 ## What it does
 
-- Loads a competitor watchlist (name + public URLs per module)
+- Loads a competitor watchlist (name + public URLs per module) from chat, state, or fixtures
 - Gathers site / pricing / changelog / careers snapshots (fixtures offline; optional public HTTP when `ALLOW_NET=1`)
 - Diffs against workspace/fixture baseline JSON and marks `material`
 - Drafts a counterposition brief + notify draft
@@ -91,37 +123,55 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 ## Smoke
 
-Minimal input JSON (material + notify; expect ask):
+**Chat (primary)** — send a HumanMessage in MARS or pass `messages` in invoke input:
+
+```text
+Track OpenAI, Anthropic, and Google for SpaceXAI
+```
+
+```text
+Pulse on Cursor and Perplexity
+```
+
+```text
+Track Cursor and alert on Slack
+```
+
+Expect: intake resolves companies from the message, `allow_net=true` for NL, stages through `draft`, and an **ask** interrupt when `notify` is on and `material == true`.
+
+**Fixture path (no chat)** — empty or generic input uses Acme/BetaCo fixtures; local script:
+
+```bash
+ALLOW_NET=0 python scripts/smoke_invoke.py
+```
+
+**Quiet path (no ask)** — pass state with a quiet baseline:
+
+```json
+{
+  "notify": true,
+  "baseline_path": "fixtures/baselines/quiet.json",
+  "allow_net": false
+}
+```
+
+**Power-user JSON** (optional) — explicit watchlist in chat or state:
 
 ```json
 {
   "watchlist": [{"name": "Acme", "urls": {"site": "https://example.com/acme/"}}],
   "notify": true,
-  "channel": "slack"
+  "channel": "slack",
+  "allow_net": false
 }
 ```
 
-Quiet path (no ask):
-
-```json
-{
-  "notify": true,
-  "baseline_path": "fixtures/baselines/quiet.json"
-}
-```
-
-Expect:
+Expect across paths:
 
 1. Stages through `draft` without side effects.
 2. An **ask** interrupt when notify is on and `material == true`; or a clean `empty` report with no ask.
 3. After Approve: stub notify evidence (`status: notified`, `notify_id` stub).
 4. After Deny: `status: denied` and no notify.
-
-Local smoke (fixtures, no API key):
-
-```bash
-ALLOW_NET=0 python scripts/smoke_invoke.py
-```
 
 ## Local
 
