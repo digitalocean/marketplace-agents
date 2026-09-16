@@ -4,18 +4,34 @@ Watchlist → public-web fetch modules → baseline diff → counterposition bri
 
 ## What it does
 
-- Loads a competitor watchlist (name + public URLs per module)
+- Loads a competitor watchlist (name + public URLs per module) — from chat (`track FedEx`) or structured input
 - Gathers site / pricing / changelog / careers snapshots (fixtures offline; optional public HTTP when `ALLOW_NET=1`)
-- Diffs against workspace/fixture baseline JSON and marks `material`
-- Drafts a counterposition brief + notify draft
+- Diffs against workspace/fixture baseline JSON
+- **First run** (no prior baseline for those pages): establishes baseline and summarizes what the pages look like in plain English — not “material changes”
+- **Later runs**: short PM-readable bullets with evidence URLs when content actually moved
 - Stops for human approval before notify when notify is requested and changes are material
+
+## Chat tone (operator-facing)
+
+The graph speaks through `human_summary` — never raw JSON or HTML source.
+
+| Situation | What you see |
+|-----------|----------------|
+| `track fedex` (first time) | Short ack + **First look — baseline established** with human page summaries |
+| Quiet re-run | **No changes** since last pulse |
+| Material diff | What moved + optional counterposition one-liners |
+| Notify | Off by default; set `notify: true` to gate an approval ask |
+
+**Before (bad):** `{"watchlist":[{"name":"FedEx",...}]}` or delta bullets with `<!DOCTYPE HTML…`
+
+**After (good):** “Got it — setting up a watch on **FedEx**. … First look — baseline established. … homepage looks like an error/downtime page — ‘FedEx \| System Downtime’.”
 
 ## What it does not (v1)
 
 - Auto-notify or send real Slack/email (act stubs `notify_id` only)
 - Competitor logins, signup identity, or scrape behind login
 - Churn winback / marketplace / desktop-bot branding
-- Presenting Approve when the diff is empty or notify is disabled
+- Presenting Approve when the diff is empty, on first baseline capture, or notify is disabled
 
 ## Run flow
 
@@ -23,7 +39,9 @@ Watchlist → public-web fetch modules → baseline diff → counterposition bri
 intake → plan → gather → analyze → draft → **ask** → act → report
 ```
 
-**Ask is skipped** when the diff is empty / non-material (`status: empty`), when `notify` is false, or when intake is blocked.
+**Ask is skipped** on first-baseline capture, when the diff is empty / non-material (`status: empty`), when `notify` is false (default), or when intake is blocked.
+
+Intermediate stages update `stage_summaries` only — the operator sees intake ack (optional) plus the final `report` message.
 
 ## Human approval
 
@@ -87,11 +105,20 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 - v1 offline path uses `fixtures/watchlist.json`, `fixtures/snapshots/`, and `fixtures/baselines/*.json`
 - Public HTTP fetch only when `ALLOW_NET=1`; tests/smoke set `ALLOW_NET=0`
-- `notify` is stubbed — records intent in state only; no Action Gateway / Slack required for local proof
+- `notify` defaults **off** — records intent in state only; no Action Gateway / Slack required for local proof
 
 ## Smoke
 
-Minimal input JSON (material + notify; expect ask):
+Chat-style input (first look, no ask):
+
+```json
+{
+  "user_message": "track fedex",
+  "allow_net": false
+}
+```
+
+Material + notify (expect ask):
 
 ```json
 {
@@ -105,7 +132,7 @@ Quiet path (no ask):
 
 ```json
 {
-  "notify": true,
+  "notify": false,
   "baseline_path": "fixtures/baselines/quiet.json"
 }
 ```
@@ -113,7 +140,7 @@ Quiet path (no ask):
 Expect:
 
 1. Stages through `draft` without side effects.
-2. An **ask** interrupt when notify is on and `material == true`; or a clean `empty` report with no ask.
+2. An **ask** interrupt when notify is on and `material == true`; or a clean `empty` / `baseline` report with no ask.
 3. After Approve: stub notify evidence (`status: notified`, `notify_id` stub).
 4. After Deny: `status: denied` and no notify.
 

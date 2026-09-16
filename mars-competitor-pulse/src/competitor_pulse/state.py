@@ -11,6 +11,10 @@ class WatchItem(TypedDict, total=False):
 
 
 class PulseState(TypedDict, total=False):
+    # Chat / intake
+    user_message: str
+    chat_ack: str
+
     # Intake
     watchlist: list[dict[str, Any]]
     notify: bool
@@ -32,6 +36,8 @@ class PulseState(TypedDict, total=False):
 
     # Analyze
     deltas: list[dict[str, Any]]
+    baseline_captures: list[dict[str, Any]]
+    first_run: bool
     material: bool
 
     # Draft
