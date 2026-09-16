@@ -11,6 +11,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from competitor_pulse.intake_parse import parse_notify_from_message, parse_watchlist_from_message
 from competitor_pulse.pulse_diff import (
     allow_network,
     default_baseline_path,
@@ -137,16 +138,55 @@ def _resolve_watchlist(
     state: PulseState,
     overlay: dict[str, Any],
     human_text: str,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
+    """Resolve watchlist with source metadata for intake defaults."""
     watchlist = list(overlay.get("watchlist") or state.get("watchlist") or [])
     if watchlist:
-        return watchlist
+        return {"watchlist": watchlist, "from_nl": False, "blocked": False}
 
     preset = (overlay.get("preset") or "").strip().lower()
     if preset == "spacexai" or "SPACEXAI_PRESET" in human_text:
-        return spacexai_watchlist()
+        return {
+            "watchlist": spacexai_watchlist(),
+            "from_nl": False,
+            "blocked": False,
+        }
 
-    return default_watchlist()
+    parsed = parse_watchlist_from_message(human_text)
+    nl_watchlist = list(parsed.get("watchlist") or [])
+    if nl_watchlist:
+        return {
+            "watchlist": nl_watchlist,
+            "from_nl": True,
+            "blocked": False,
+            "notify": parsed.get("notify"),
+            "source": parsed.get("source"),
+        }
+
+    if parsed.get("is_tracking_request") and not parsed.get("is_generic"):
+        return {
+            "watchlist": [],
+            "from_nl": True,
+            "blocked": True,
+            "notify": parsed.get("notify"),
+            "blocked_summary": (
+                "Could not resolve companies to track. "
+                "Please name specific competitors (e.g. OpenAI, Anthropic, Cursor)."
+            ),
+        }
+
+    if parsed.get("is_generic") or not human_text.strip():
+        return {
+            "watchlist": default_watchlist(),
+            "from_nl": False,
+            "blocked": False,
+        }
+
+    return {
+        "watchlist": default_watchlist(),
+        "from_nl": False,
+        "blocked": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +213,38 @@ def intake(state: PulseState) -> dict[str, Any]:
     intake_json = _parse_intake_json(human_text)
     overlay = _apply_intake_overlay(state, intake_json or {})
 
-    watchlist = _resolve_watchlist(state, overlay, human_text)
+    resolved = _resolve_watchlist(state, overlay, human_text)
+    watchlist = list(resolved.get("watchlist") or [])
+    from_nl = bool(resolved.get("from_nl"))
 
-    notify = bool(overlay.get("notify")) if "notify" in overlay else bool(state.get("notify"))
+    if resolved.get("blocked"):
+        blocked_summary = resolved.get("blocked_summary") or (
+            "Could not resolve companies to track."
+        )
+        return {
+            "status": "blocked",
+            "watchlist": [],
+            "notify": False,
+            "human_summary": blocked_summary,
+            "stage_summaries": _append_summary(
+                state, f"intake: blocked — {blocked_summary}"
+            ),
+            "deltas": [],
+            "material": False,
+            "skipped": False,
+        }
+
+    if "notify" in overlay:
+        notify = bool(overlay.get("notify"))
+    elif "notify" in state:
+        notify = bool(state.get("notify"))
+    elif resolved.get("notify") is not None:
+        notify = bool(resolved.get("notify"))
+    elif human_text.strip():
+        notify = bool(parse_notify_from_message(human_text) or False)
+    else:
+        notify = False
+
     channel = (
         overlay.get("channel")
         or (state.get("channel") or "slack").strip()
@@ -194,11 +263,18 @@ def intake(state: PulseState) -> dict[str, Any]:
         allow_net = bool(overlay.get("allow_net"))
     elif "allow_net" in state:
         allow_net = bool(state.get("allow_net"))
+    elif from_nl:
+        allow_net = True
     else:
         allow_net = allow_network()
 
     n = len(watchlist)
+    names = ", ".join((item.get("name") or "?") for item in watchlist[:5])
+    if n > 5:
+        names += f", +{n - 5} more"
     summary = f"Pulse for {n} competitor{'s' if n != 1 else ''}."
+    if from_nl and names:
+        summary = f"{summary} Tracking: {names}."
     return {
         "watchlist": watchlist,
         "notify": notify,
