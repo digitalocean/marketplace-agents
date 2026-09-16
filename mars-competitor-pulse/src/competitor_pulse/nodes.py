@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import AIMessage
+
 from competitor_pulse.pulse_diff import (
     allow_network,
     default_baseline_path,
@@ -43,6 +45,14 @@ def _normalize_decision(raw: Any) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _assistant_reply(summary: str, brief_md: str | None = None) -> dict[str, Any]:
+    """Build the final assistant-visible chat message for Agent Server / MARS UI."""
+    content = summary
+    if brief_md:
+        content = f"{summary}\n\n---\n\n{brief_md}"
+    return {"messages": [AIMessage(content=content)]}
 
 
 # ---------------------------------------------------------------------------
@@ -566,4 +576,5 @@ def report(state: PulseState) -> dict[str, Any]:
         "next_hint": next_hint,
         "baseline_updated": baseline_updated,
         "stage_summaries": _append_summary(state, "report: complete"),
+        **_assistant_reply(summary, state.get("brief_md") or None),
     }

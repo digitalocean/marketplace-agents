@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 
 
 class WatchItem(TypedDict, total=False):
@@ -11,6 +14,8 @@ class WatchItem(TypedDict, total=False):
 
 
 class PulseState(TypedDict, total=False):
+    messages: Annotated[list[AnyMessage], add_messages]
+
     # Intake
     watchlist: list[dict[str, Any]]
     notify: bool
