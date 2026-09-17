@@ -54,3 +54,31 @@ def test_output_schema_messages_only_for_chat_text(monkeypatch):
     props = g.get_output_jsonschema().get("properties") or {}
     assert "messages" in props
     assert "human_summary" not in props
+
+
+def test_audit_stream_no_human_summary_or_emdash(monkeypatch):
+    """Self-check / draft interim summaries must not leak em-dashes into stream text."""
+    _offline(monkeypatch)
+    from nightly_repo_audit.repo_scan import default_fixture_path
+
+    g = compile_graph()
+    payload = {
+        "repo": "local/sample",
+        "ref": "main",
+        "fixture_path": str(default_fixture_path()),
+        "force_empty": True,
+    }
+    streamed = ""
+    for chunk in g.stream(payload, stream_mode="updates"):
+        for _node, update in chunk.items():
+            if not isinstance(update, dict):
+                continue
+            assert "human_summary" not in update
+            for key in ("human_summary", "converse_reply", "chat_ack"):
+                streamed += str(update.get(key) or "")
+            for msg in update.get("messages") or []:
+                if isinstance(msg, AIMessage):
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    streamed += content
+    assert "—" not in streamed
+    assert "–" not in streamed

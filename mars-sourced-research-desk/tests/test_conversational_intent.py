@@ -24,6 +24,24 @@ def test_classify_chat_and_help():
     assert is_help_message("how does this work") is True
 
 
+def test_research_sources_not_help():
+    """Natural research NL must not route to meta help."""
+    text = "Research sources for LangGraph interrupts"
+    assert classify_intent(text) == "research_plan"
+    assert is_help_message(text) is False
+
+
+def test_approve_deny_with_pending_research():
+    pending = {"question": "LangGraph HITL patterns"}
+    assert classify_intent("approve", pending_research=pending) == "research"
+    assert classify_intent("deny", pending_research=pending) == "plan_denied"
+    assert classify_intent("yes", pending_research=pending) == "research"
+    assert classify_intent("approve") == "other"
+    assert classify_intent("deny") == "other"
+    assert is_help_message("approve") is False
+    assert is_help_message("deny") is False
+
+
 def test_intake_hi_emits_chat_aimessage(monkeypatch):
     _offline(monkeypatch)
     result = intake({"messages": [HumanMessage(content="hi")]})

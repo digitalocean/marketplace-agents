@@ -50,7 +50,7 @@ def test_plan_confirm_interrupt_before_gather(monkeypatch):
 def test_plan_confirm_resume_harness_approved_true(monkeypatch):
     """MARS --on-hitl approve may resume {approved: true} or bare True."""
     _offline(monkeypatch)
-    for resume_val in ({"approved": True}, True):
+    for resume_val in ({"approved": True}, True, "approve"):
         g = compile_graph(checkpointer=MemorySaver())
         cfg = {
             "configurable": {"thread_id": f"nightly-hitl-{type(resume_val).__name__}"}

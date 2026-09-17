@@ -64,6 +64,21 @@ def test_help_full_graph(monkeypatch):
     assert "how i work" in summary.lower() or "hygiene" in summary.lower()
 
 
+def test_b2_starter_intent_matrix():
+    """Each B2 welcome starter must enter audit_plan, never help."""
+    starters = [
+        "Audit owner/name on main, area src",
+        "Nightly cleanup on owner/name (fixtures OK)",
+        "Audit owner/name and prepare a draft PR",
+    ]
+    help_copy = help_message()
+    for text in starters:
+        assert classify_intent(text) == "audit_plan"
+        assert is_audit_request(text)
+        assert classify_intent(text) != "help"
+        assert help_copy not in text
+
+
 def test_audit_nl_not_help():
     """Domain audit prompts must not route to help (Reed MARS smoke)."""
     samples = [
@@ -74,11 +89,21 @@ def test_audit_nl_not_help():
         "cleanup src on acme/widgets",
         "Run audit on acme/widgets",
     ]
-    help_copy = help_message()
     for text in samples:
         assert classify_intent(text) == "audit_plan"
         assert is_audit_request(text)
         assert classify_intent(text) != "help"
+
+
+def test_approve_deny_with_pending_audit():
+    pending = {"repo": "acme/widgets", "area": "src"}
+    assert classify_intent("approve", pending_audit=pending) == "audit"
+    assert classify_intent("deny", pending_audit=pending) == "plan_denied"
+    assert classify_intent("yes", pending_audit=pending) == "audit"
+    assert classify_intent("approve") == "other"
+    assert classify_intent("deny") == "other"
+    assert is_help_message("approve") is False
+    assert is_help_message("deny") is False
 
 
 def test_audit_nl_full_graph_plan_confirm_not_help(monkeypatch):

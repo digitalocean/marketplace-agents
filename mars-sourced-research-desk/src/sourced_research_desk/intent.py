@@ -17,10 +17,19 @@ _CHAT_RE = re.compile(
 )
 
 _PLAN_CONFIRM_RE = re.compile(
-    r"^(?:yes|y|go|run\s+it|do\s+it|looks\s+good|ok|okay)\s*[!.?]*$",
+    r"^(?:"
+    r"yes|y|go|run\s+it|do\s+it|looks\s+good|ok|okay|"
+    r"approve|approved"
+    r")\s*[!.?]*$",
     re.IGNORECASE,
 )
 
+_DECISION_DENY_RE = re.compile(
+    r"^(?:deny|denied|no|n)\s*[!.?]*$",
+    re.IGNORECASE,
+)
+
+# Meta help only — no bare approve/deny/sources/citations (those are decisions or research NL).
 _HELP_RE = re.compile(
     r"\b("
     r"what\s+do\s+you\s+do|"
@@ -35,11 +44,12 @@ _HELP_RE = re.compile(
     r"limitations?|limits?|"
     r"getting\s+started|"
     r"instructions?|"
-    r"sources?|"
-    r"citations?|"
-    r"outbound|"
-    r"approve|"
-    r"deny"
+    r"what\s+(?:sources?|citations?)\s+do\s+you\s+use|"
+    r"how\s+(?:do|are)\s+(?:sources?|citations?)\s+work|"
+    r"how\s+do\s+citations?\s+work|"
+    r"what\s+is\s+(?:a\s+)?citation|"
+    r"how\s+(?:does|do)\s+outbound\s+work|"
+    r"what\s+is\s+outbound"
     r")\b",
     re.IGNORECASE,
 )
@@ -66,16 +76,32 @@ def is_plan_confirm(text: str) -> bool:
     return bool(_PLAN_CONFIRM_RE.match(stripped))
 
 
+def is_decision_deny(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    return bool(_DECISION_DENY_RE.match(stripped))
+
+
+def is_decision_token(text: str) -> bool:
+    return is_plan_confirm(text) or is_decision_deny(text)
+
+
 def classify_intent(
     human_text: str,
     *,
     has_question: bool = False,
     pending_research: dict | None = None,
 ) -> str:
-    """Return chat | help | research | research_plan | other."""
+    """Return chat | help | research | research_plan | plan_denied | other."""
     text = (human_text or "").strip()
-    if pending_research and is_plan_confirm(text):
-        return "research"
+    if pending_research:
+        if is_plan_confirm(text):
+            return "research"
+        if is_decision_deny(text):
+            return "plan_denied"
+    if is_decision_token(text) and not pending_research:
+        return "other"
     if is_help_message(text):
         return "help"
     if is_chat_message(text):

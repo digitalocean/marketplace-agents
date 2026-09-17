@@ -28,6 +28,7 @@ from sourced_research_desk.persona import (
     plan_angle_from_subquestions,
     plan_confirm_body,
     plan_confirm_title,
+    plan_confirmed_message,
     plan_declined_message,
     degrade_message,
     research_only_success_message,
@@ -89,6 +90,18 @@ def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in full.items() if key != "human_summary"}
 
 
+def _mars_node(fn):
+    def wrapped(state):
+        out = fn(state)
+        if not out:
+            return out
+        return _mars_stream_safe_update(out)
+
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
 def _normalize_decision(raw: Any) -> str:
     """approve|deny — MARS harness may send bool, {approved: true}, or strings."""
     if isinstance(raw, dict):
@@ -127,11 +140,12 @@ def intake(state: ResearchState) -> dict[str, Any]:
             has_question=bool(question),
             pending_research=pending if isinstance(pending, dict) else None,
         )
-        if intent in {"chat", "help", "other"}:
+        if intent in {"chat", "help", "other", "plan_denied"}:
             reply = conversational_reply(intent, human_text)
+            status = "plan_denied" if intent == "plan_denied" else intent
             return {
                 "intent": intent,
-                "status": intent,
+                "status": status,
                 "sent": False,
                 "skipped": False,
                 "unsourced": False,
@@ -189,10 +203,10 @@ def intake_node(state: ResearchState) -> dict[str, Any]:
 
 
 def route_after_intake(state: ResearchState) -> str:
-    if state.get("status") == "blocked":
+    if state.get("status") in {"blocked", "plan_denied"}:
         return "end"
     intent = (state.get("intent") or "research").strip().lower()
-    if intent in {"chat", "help", "other"}:
+    if intent in {"chat", "help", "other", "plan_denied"}:
         return "end"
     return "plan"
 
@@ -302,9 +316,11 @@ def confirm_plan(state: ResearchState) -> dict[str, Any]:
     decision = interrupt(payload)
     decision_s = _normalize_decision(decision)
     if decision_s == "approve":
+        confirmed = plan_confirmed_message()
         return {
             "plan_confirmed": True,
             "stage_summaries": _append_summary(state, "confirm_plan: approve"),
+            **_assistant_reply(confirmed, None),
         }
     return {
         "plan_confirmed": False,
@@ -634,7 +650,7 @@ def draft(state: ResearchState) -> dict[str, Any]:
             "unsourced": False,
             "status": "empty",
             "draft_message": brief,
-            "human_summary": "Brief empty — no claims.",
+            "human_summary": hygiene_text("Brief empty, no claims."),
             "stage_summaries": _append_summary(
                 state, "draft: empty — no claims"
             ),
@@ -648,8 +664,8 @@ def draft(state: ResearchState) -> dict[str, Any]:
 
     status = "blocked" if unsourced else (state.get("status") or "ok")
     if unsourced:
-        summary = (
-            "Unsourced claims — revise question or allow more fetches; "
+        summary = hygiene_text(
+            "Unsourced claims, revise question or allow more fetches; "
             "no outbound ask."
         )
     else:
@@ -810,3 +826,14 @@ def report(state: ResearchState) -> dict[str, Any]:
         "stage_summaries": _append_summary(state, "report: complete"),
         **_assistant_reply(summary, attach_brief),
     }
+
+
+# MARS stream-safe node exports (strip human_summary from doctl stream updates)
+plan_node = _mars_node(plan)
+confirm_plan_node = _mars_node(confirm_plan)
+gather_node = _mars_node(gather)
+analyze_node = _mars_node(analyze)
+draft_node = _mars_node(draft)
+ask_node = _mars_node(ask)
+act_node = _mars_node(act)
+report_node = _mars_node(report)

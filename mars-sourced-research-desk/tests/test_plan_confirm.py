@@ -56,7 +56,7 @@ def test_plan_confirm_resume_harness_approved_true(monkeypatch):
             "text": "A claim.",
         }
     ]
-    for resume_val in ({"approved": True}, True):
+    for resume_val in ({"approved": True}, True, "approve"):
         g = compile_graph(checkpointer=MemorySaver())
         cfg = {"configurable": {"thread_id": f"desk-hitl-{type(resume_val).__name__}"}}
         g.invoke(

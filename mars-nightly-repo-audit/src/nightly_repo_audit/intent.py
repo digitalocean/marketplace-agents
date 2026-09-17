@@ -17,11 +17,19 @@ _CHAT_RE = re.compile(
 )
 
 _PLAN_CONFIRM_RE = re.compile(
-    r"^(?:yes|y|go|run\s+it|do\s+it|looks\s+good|ok|okay)\s*[!.?]*$",
+    r"^(?:"
+    r"yes|y|go|run\s+it|do\s+it|looks\s+good|ok|okay|"
+    r"approve|approved"
+    r")\s*[!.?]*$",
     re.IGNORECASE,
 )
 
-# Run / domain language (check before meta help — ``cleanup`` etc. also appear in help topics).
+_DECISION_DENY_RE = re.compile(
+    r"^(?:deny|denied|no|n)\s*[!.?]*$",
+    re.IGNORECASE,
+)
+
+# Run / domain language (before meta help).
 _AUDIT_REQUEST_RE = re.compile(
     r"(?:"
     r"^\s*audit\b|"
@@ -35,6 +43,7 @@ _AUDIT_REQUEST_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Meta help only — no bare cleanup/findings/approve/deny.
 _HELP_RE = re.compile(
     r"\b("
     r"what\s+do\s+you\s+do|"
@@ -49,8 +58,8 @@ _HELP_RE = re.compile(
     r"limitations?|limits?|"
     r"getting\s+started|"
     r"instructions?|"
-    r"approve|"
-    r"deny"
+    r"how\s+(?:does|do)\s+(?:a\s+)?finding\s+work|"
+    r"what\s+(?:is|are)\s+(?:a\s+)?findings?"
     r")\b",
     re.IGNORECASE,
 )
@@ -85,16 +94,32 @@ def is_plan_confirm(text: str) -> bool:
     return bool(_PLAN_CONFIRM_RE.match(stripped))
 
 
+def is_decision_deny(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    return bool(_DECISION_DENY_RE.match(stripped))
+
+
+def is_decision_token(text: str) -> bool:
+    return is_plan_confirm(text) or is_decision_deny(text)
+
+
 def classify_intent(
     human_text: str,
     *,
     programmatic_audit: bool = False,
     pending_audit: dict | None = None,
 ) -> str:
-    """Return chat | help | audit | audit_plan | other."""
+    """Return chat | help | audit | audit_plan | plan_denied | other."""
     text = (human_text or "").strip()
-    if pending_audit and is_plan_confirm(text):
-        return "audit"
+    if pending_audit:
+        if is_plan_confirm(text):
+            return "audit"
+        if is_decision_deny(text):
+            return "plan_denied"
+    if is_decision_token(text) and not pending_audit:
+        return "other"
     if is_audit_request(text):
         return "audit_plan"
     if is_help_message(text):

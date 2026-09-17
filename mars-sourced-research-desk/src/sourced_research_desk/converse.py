@@ -9,10 +9,17 @@ from __future__ import annotations
 
 from sourced_research_desk.hygiene import hygiene_text
 from sourced_research_desk.intent import is_chat_message, is_help_message
-from sourced_research_desk.persona import help_for_topic, other_message, welcome_message
+from sourced_research_desk.persona import (
+    help_for_topic,
+    other_message,
+    plan_declined_message,
+    welcome_message,
+)
 
 
 def template_reply(intent: str, human_text: str = "") -> str:
+    if intent == "plan_denied":
+        return plan_declined_message()
     if intent == "help":
         return help_for_topic(human_text)
     if intent == "other":

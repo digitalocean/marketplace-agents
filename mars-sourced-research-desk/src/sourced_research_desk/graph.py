@@ -7,15 +7,15 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from sourced_research_desk.nodes import (
-    act,
-    analyze,
-    ask,
-    confirm_plan,
-    draft,
-    gather,
+    act_node,
+    analyze_node,
+    ask_node,
+    confirm_plan_node,
+    draft_node,
+    gather_node,
     intake_node,
-    plan,
-    report,
+    plan_node,
+    report_node,
     route_after_confirm_plan,
     route_after_intake,
     should_ask,
@@ -36,14 +36,14 @@ def build_graph() -> StateGraph:
         output_schema=OutputState,
     )
     builder.add_node("intake", intake_node)
-    builder.add_node("plan", plan)
-    builder.add_node("confirm_plan", confirm_plan)
-    builder.add_node("gather", gather)
-    builder.add_node("analyze", analyze)
-    builder.add_node("draft", draft)
-    builder.add_node("ask", ask)
-    builder.add_node("act", act)
-    builder.add_node("report", report)
+    builder.add_node("plan", plan_node)
+    builder.add_node("confirm_plan", confirm_plan_node)
+    builder.add_node("gather", gather_node)
+    builder.add_node("analyze", analyze_node)
+    builder.add_node("draft", draft_node)
+    builder.add_node("ask", ask_node)
+    builder.add_node("act", act_node)
+    builder.add_node("report", report_node)
 
     builder.add_edge(START, "intake")
     builder.add_conditional_edges(

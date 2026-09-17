@@ -19,6 +19,7 @@ from nightly_repo_audit.persona import (
     empty_message,
     plan_confirm_body,
     plan_confirm_title,
+    plan_confirmed_message,
     plan_declined_message,
 )
 from nightly_repo_audit.repo_scan import default_fixture_path, scan_repo
@@ -55,6 +56,18 @@ def _assistant_reply(summary: str) -> dict[str, Any]:
 
 def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in full.items() if key != "human_summary"}
+
+
+def _mars_node(fn):
+    def wrapped(state):
+        out = fn(state)
+        if not out:
+            return out
+        return _mars_stream_safe_update(out)
+
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
 
 
 def _programmatic_audit(state: AuditState) -> bool:
@@ -106,11 +119,12 @@ def intake(state: AuditState) -> dict[str, Any]:
             programmatic_audit=programmatic,
             pending_audit=pending if isinstance(pending, dict) else None,
         )
-        if intent in {"chat", "help", "other"}:
+        if intent in {"chat", "help", "other", "plan_denied"}:
             reply = conversational_reply(intent, human_text)
+            status = "plan_denied" if intent == "plan_denied" else intent
             return {
                 "intent": intent,
-                "status": intent,
+                "status": status,
                 "skipped": False,
                 "findings": [],
                 **_assistant_reply(reply),
@@ -173,10 +187,10 @@ def intake_node(state: AuditState) -> dict[str, Any]:
 
 
 def route_after_intake(state: AuditState) -> str:
-    if state.get("status") == "blocked":
+    if state.get("status") in {"blocked", "plan_denied"}:
         return "end"
     intent = (state.get("intent") or "audit").strip().lower()
-    if intent in {"chat", "help", "other"}:
+    if intent in {"chat", "help", "other", "plan_denied"}:
         return "end"
     return "plan"
 
@@ -269,9 +283,11 @@ def confirm_plan(state: AuditState) -> dict[str, Any]:
     decision = interrupt(payload)
     decision_s = _normalize_decision(decision)
     if decision_s == "approve":
+        confirmed = plan_confirmed_message(area=area, repo=repo)
         return {
             "plan_confirmed": True,
             "stage_summaries": _append_summary(state, "confirm_plan: approve"),
+            **_assistant_reply(confirmed),
         }
     return {
         "plan_confirmed": False,
@@ -383,7 +399,9 @@ def analyze(state: AuditState) -> dict[str, Any]:
             "findings": findings,
             "self_check_pass": False,
             "status": "blocked",
-            "human_summary": "Self-check failed — incomplete findings; no ask.",
+            "human_summary": hygiene_text(
+                "Self-check failed, incomplete findings; no ask."
+            ),
             "stage_summaries": _append_summary(state, "analyze: self-check fail"),
         }
 
@@ -609,3 +627,14 @@ def report(state: AuditState) -> dict[str, Any]:
         "stage_summaries": _append_summary(state, "report: complete"),
         **_assistant_reply(cleaned),
     }
+
+
+# MARS stream-safe node exports (strip human_summary from doctl stream updates)
+plan_node = _mars_node(plan)
+confirm_plan_node = _mars_node(confirm_plan)
+gather_node = _mars_node(gather)
+analyze_node = _mars_node(analyze)
+draft_node = _mars_node(draft)
+ask_node = _mars_node(ask)
+act_node = _mars_node(act)
+report_node = _mars_node(report)
