@@ -16,11 +16,11 @@ class WatchItem(TypedDict, total=False):
 class InternalState(TypedDict, total=False):
     """Graph-internal payload — never in input/output schemas or MARS stream text."""
 
-    watchlist: list[dict[str, Any]]
+    competitors: list[dict[str, Any]]
 
 
 class InputState(TypedDict, total=False):
-    """MARS / doctl chat input — no watchlist (avoids empty ``{"watchlist":[]}`` echo)."""
+    """MARS / doctl chat input — no competitors (avoids empty list-field echo in doctl text)."""
 
     messages: Annotated[list[AnyMessage], add_messages]
     user_message: str

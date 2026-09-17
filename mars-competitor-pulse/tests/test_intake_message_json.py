@@ -46,11 +46,11 @@ def test_intake_spacexai_preset_from_json():
     assert result["notify"] is False
 
 
-def test_intake_prefers_state_watchlist_over_message_json():
-    state_watchlist = [{"name": "InState", "urls": {"site": "https://example.com/in/"}}]
+def test_intake_prefers_state_competitors_over_message_json():
+    state_competitors = [{"name": "InState", "urls": {"site": "https://example.com/in/"}}]
     result = intake(
         {
-            "internal": {"watchlist": state_watchlist},
+            "internal": {"competitors": state_competitors},
             "messages": [
                 HumanMessage(
                     content='{"watchlist": [{"name": "FromMsg", "urls": {"site": "https://example.com/msg/"}}]}'
@@ -58,7 +58,21 @@ def test_intake_prefers_state_watchlist_over_message_json():
             ],
         }
     )
-    assert watchlist_from_state(result) == state_watchlist
+    assert watchlist_from_state(result) == state_competitors
+
+
+def test_intake_accepts_legacy_watchlist_json_key():
+    custom = [{"name": "Legacy", "urls": {"site": "https://example.com/legacy/"}}]
+    result = intake(
+        {
+            "messages": [
+                HumanMessage(
+                    content=json.dumps({"watchlist": custom, "allow_net": False})
+                )
+            ]
+        }
+    )
+    assert watchlist_from_state(result) == custom
 
 
 def test_intake_spacexai_token_without_json_preset():

@@ -301,11 +301,13 @@ def _llm_watchlist(text: str) -> list[dict[str, Any]] | None:
         if brace:
             content = brace.group(0)
         parsed = json.loads(content)
-        watchlist = parsed.get("watchlist") if isinstance(parsed, dict) else None
-        if not isinstance(watchlist, list):
+        raw_list = None
+        if isinstance(parsed, dict):
+            raw_list = parsed.get("competitors") or parsed.get("watchlist")
+        if not isinstance(raw_list, list):
             return None
         cleaned: list[dict[str, Any]] = []
-        for item in watchlist:
+        for item in raw_list:
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "").strip()
@@ -319,10 +321,10 @@ def _llm_watchlist(text: str) -> list[dict[str, Any]] | None:
 
 
 def parse_watchlist_from_message(text: str) -> dict[str, Any]:
-    """Parse natural-language intake into watchlist metadata.
+    """Parse natural-language intake into competitor list metadata.
 
     Returns dict with keys:
-      watchlist: list[dict] (may be empty)
+      competitors: list[dict] (may be empty)
       notify: bool | None
       is_tracking_request: bool
       is_generic: bool
@@ -330,7 +332,7 @@ def parse_watchlist_from_message(text: str) -> dict[str, Any]:
     """
     stripped = (text or "").strip()
     result: dict[str, Any] = {
-        "watchlist": [],
+        "competitors": [],
         "notify": parse_notify_from_message(stripped),
         "is_tracking_request": is_tracking_request(stripped),
         "is_generic": is_generic_message(stripped),
@@ -342,13 +344,13 @@ def parse_watchlist_from_message(text: str) -> dict[str, Any]:
 
     offline = _offline_watchlist(stripped)
     if offline:
-        result["watchlist"] = offline
+        result["competitors"] = offline
         result["source"] = "offline"
         return result
 
     llm_list = _llm_watchlist(stripped)
     if llm_list:
-        result["watchlist"] = _attach_urls(llm_list, stripped)
+        result["competitors"] = _attach_urls(llm_list, stripped)
         result["source"] = "llm"
         return result
 

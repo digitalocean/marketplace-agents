@@ -22,7 +22,7 @@ def test_parse_nl_known_aliases():
     parsed = parse_watchlist_from_message(
         "Track OpenAI, Anthropic, and Google for SpaceXAI"
     )
-    names = [item["name"] for item in parsed["watchlist"]]
+    names = [item["name"] for item in parsed["competitors"]]
     assert names == ["OpenAI", "Anthropic", "Google AI"]
     assert parsed["source"] == "offline"
     assert parsed["notify"] is None
@@ -30,7 +30,7 @@ def test_parse_nl_known_aliases():
 
 def test_parse_pulse_on_cursor_and_perplexity():
     parsed = parse_watchlist_from_message("Pulse on Cursor and Perplexity")
-    names = [item["name"] for item in parsed["watchlist"]]
+    names = [item["name"] for item in parsed["competitors"]]
     assert names == ["Cursor", "Perplexity"]
     assert parsed["is_tracking_request"] is True
 
@@ -77,6 +77,7 @@ def test_intake_generic_message_routes_to_chat(monkeypatch):
     result = intake({"messages": [HumanMessage(content="hi")]})
     assert result.get("intent") == "chat"
     assert "watchlist" not in result
+    assert "competitors" not in result
     assert "internal" not in result
     assert result["status"] == "chat"
 
@@ -98,6 +99,7 @@ def test_intake_unresolved_track_request_blocked(monkeypatch):
     )
     assert result["status"] == "blocked"
     assert "watchlist" not in result
+    assert "competitors" not in result
     assert "internal" not in result
     assert "resolve" in (result.get("blocked_reason") or "").lower()
     names = {item["name"] for item in default_watchlist()}

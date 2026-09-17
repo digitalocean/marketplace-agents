@@ -11,7 +11,11 @@ from langgraph.types import Command
 
 from competitor_pulse.chat import contains_watchlist_json
 from competitor_pulse.graph import compile_graph
-from competitor_pulse.mars_text import assemble_doctl_prompt_text, hi_chat_payload
+from competitor_pulse.mars_text import (
+    assemble_doctl_prompt_text,
+    hi_chat_payload,
+    strip_doctl_artifacts,
+)
 from competitor_pulse.pulse_diff import (
     default_baseline_path,
     default_watchlist,
@@ -134,6 +138,7 @@ def test_stream_updates_never_include_watchlist(monkeypatch):
     ):
         for _node, update in chunk.items():
             assert "watchlist" not in (update or {})
+            assert "competitors" not in (update or {})
             assert "internal" not in (update or {})
             assert "converse_reply" not in (update or {})
             if update and update.get("messages"):
@@ -156,6 +161,7 @@ def test_hi_stream_has_no_watchlist_or_duplicate_messages(monkeypatch):
     ):
         for _node, update in chunk.items():
             assert "watchlist" not in (update or {})
+            assert "competitors" not in (update or {})
             assert "internal" not in (update or {})
             assert "converse_reply" not in (update or {})
             if update and update.get("messages"):
@@ -172,10 +178,10 @@ def test_graph_compile_name(monkeypatch):
 
 
 def test_doctl_shaped_hi_text_clean(monkeypatch):
-    """Production doctl ``text``: no watchlist JSON prefix, greeting once."""
+    """Production doctl ``text``: no watchlist JSON prefix, greeting once after strip."""
     _offline(monkeypatch)
     g = compile_graph()
-    text = assemble_doctl_prompt_text(g, hi_chat_payload())
+    text = strip_doctl_artifacts(assemble_doctl_prompt_text(g, hi_chat_payload()))
     assert not contains_watchlist_json(text)
     assert text.count("Competitor Pulse") >= 1
     assert text.index("Competitor Pulse") == text.rindex("Competitor Pulse")

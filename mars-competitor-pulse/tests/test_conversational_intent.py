@@ -38,6 +38,7 @@ def test_intake_hi_is_chat_not_acme(monkeypatch):
     assert result.get("intent") == "chat"
     assert watchlist_from_state(result) == []
     assert "watchlist" not in result
+    assert "competitors" not in result
     assert "internal" not in result
 
 

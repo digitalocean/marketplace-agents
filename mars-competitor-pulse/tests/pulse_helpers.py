@@ -44,7 +44,7 @@ def assistant_summary(result: dict[str, Any]) -> str:
 
 def default_pulse_payload(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "watchlist": default_watchlist(),
+        "competitors": default_watchlist(),
         "notify": False,
         "allow_net": False,
     }
