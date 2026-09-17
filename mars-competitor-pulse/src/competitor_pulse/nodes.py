@@ -19,10 +19,21 @@ from competitor_pulse.chat import (
 )
 from competitor_pulse.converse import conversational_reply
 from competitor_pulse.intent import classify_intent
+from competitor_pulse.draft_llm import synthesize_material_draft
+from competitor_pulse.hygiene import hygiene_text
+from competitor_pulse.persona import (
+    approve_stub_message,
+    ask_body,
+    ask_highlights,
+    brief_prose,
+    deny_message,
+    first_look_message,
+    material_chat_message,
+    quiet_message,
+)
 from competitor_pulse.intake_parse import parse_notify_from_message, parse_watchlist_from_message
 from competitor_pulse.pulse_diff import (
     allow_network,
-    counterposition_line,
     default_baseline_path,
     default_fixture_dir,
     default_snapshot_dir,
@@ -62,10 +73,17 @@ def _now_iso() -> str:
 
 
 def _assistant_reply(summary: str, brief_md: str | None = None) -> dict[str, Any]:
-    """Build the final assistant-visible chat message for Agent Server / MARS UI."""
-    content = summary
-    if brief_md:
-        content = f"{summary}\n\n---\n\n{brief_md}"
+    """Build the final assistant-visible chat message for Agent Server / MARS UI.
+
+    Only append ``brief_md`` when it adds new prose. First-look summaries already
+    embed ``brief_md`` (baseline + captures); re-appending duplicated the baseline
+    across a ``---`` separator in doctl ``text``.
+    Hygiene runs on every user-facing AIMessage before emit (Sol §8).
+    """
+    content = hygiene_text(summary or "")
+    brief = hygiene_text((brief_md or "").strip())
+    if brief and brief not in content:
+        content = f"{content}\n\n---\n\n{brief}"
     return {
         "messages": [
             AIMessage(content=content, name=ASSISTANT_DISPLAY_NAME),
@@ -132,11 +150,16 @@ def _competitors_from_update(full: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
-    """Drop internal/competitors keys from node stream updates."""
+    """Drop internal/competitors/chat_ack from node stream updates.
+
+    ``chat_ack`` is rebuilt in report from ``watch_names`` — returning it from
+    intake *and* execute_pulse made doctl concatenate the ack multiple times
+    before the final AIMessage (which also embeds the ack).
+    """
     return {
         key: value
         for key, value in full.items()
-        if key not in {"watchlist", "competitors", "internal"}
+        if key not in {"watchlist", "competitors", "internal", "chat_ack"}
     }
 
 
@@ -147,7 +170,6 @@ def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
         "watch_names": _watch_names_from(watchlist),
     }
     passthrough = (
-        "chat_ack",
         "notify",
         "channel",
         "fixture_dir",
@@ -341,7 +363,7 @@ def _delta_bullet(d: dict[str, Any]) -> str:
     url = d.get("evidence_url") or ""
     line = f"- **{comp}** ({module}): {summary}"
     if url:
-        line += f" — {url}"
+        line += f". Evidence: {url}"
     return line
 
 
@@ -736,26 +758,12 @@ def draft(state: PulseState) -> dict[str, Any]:
         }
 
     delta_count = len(deltas)
-    names = sorted({d.get("competitor") or "?" for d in deltas})
+    gaps = list(state.get("fetch_gaps") or [])
 
     if first_run:
-        brief_lines = [
-            "# Competitor Pulse — first look",
-            "",
-            f"Baseline captured for **{', '.join(names)}**.",
-            "",
-            "## What we saw",
-            "",
-        ]
-        for d in deltas:
-            brief_lines.append(_delta_bullet(d))
-        brief_lines.extend(
-            [
-                "",
-                "_Next pulse will flag real changes against this baseline._",
-            ]
+        brief_md = hygiene_text(
+            brief_prose(first_run=True, deltas=deltas, gaps=gaps or None)
         )
-        brief_md = "\n".join(brief_lines)
         return {
             "brief_md": brief_md,
             "counterpositions": [],
@@ -767,46 +775,21 @@ def draft(state: PulseState) -> dict[str, Any]:
             ),
         }
 
-    counterpositions = [
-        line
-        for d in deltas[:7]
-        for line in [counterposition_line(d)]
-        if line
-    ]
-    brief_lines = [
-        "# Competitor Pulse brief",
-        "",
-        f"**{delta_count}** material change(s) across {', '.join(names)}.",
-        "",
-        "## What moved",
-        "",
-    ]
-    for d in deltas:
-        brief_lines.append(_delta_bullet(d))
-    if counterpositions:
-        brief_lines.extend(["", "## Counterpositions", ""])
-        for c in counterpositions:
-            brief_lines.append(f"- {c}")
-    brief_md = "\n".join(brief_lines)
-
-    highlights = "\n".join(
-        f"- {d.get('competitor')} ({d.get('module')}): {d.get('summary')}"
-        for d in deltas[:5]
-    )
-    notify_draft = (
-        f"Pulse: {delta_count} material change(s) — {', '.join(names)}.\n"
-        f"{highlights}"
-    )
+    # Diffs stay deterministic; synthesis is template by default.
+    # LLM path is opt-in via COMPETITOR_PULSE_LLM_DRAFT (off) — MARS stream leak risk.
+    synthesized = synthesize_material_draft(deltas)
     return {
-        "brief_md": brief_md,
-        "counterpositions": counterpositions,
+        "brief_md": synthesized["brief_md"],
+        "counterpositions": synthesized["counterpositions"],
         "delta_count": delta_count,
-        "notify_draft": notify_draft,
+        "notify_draft": synthesized["notify_draft"],
         "status": "ok",
         "stage_summaries": _append_summary(
-            state, f"draft: brief with {delta_count} deltas"
+            state,
+            f"draft: brief with {delta_count} deltas ({synthesized.get('draft_source', 'template')})",
         ),
     }
+
 
 
 # ---------------------------------------------------------------------------
@@ -869,21 +852,17 @@ def ask(state: PulseState) -> dict[str, Any]:
     deltas = list(state.get("deltas") or [])
     delta_count = state.get("delta_count") or len(deltas)
     names = sorted({d.get("competitor") or "?" for d in deltas})
-    highlights = "\n".join(
-        f"- {d.get('competitor')} ({d.get('module')}): {d.get('summary')}"
-        for d in deltas[:7]
-    ) or "- (none)"
+    highlights = ask_highlights(deltas, limit=7)
     notify_draft = state.get("notify_draft") or "(empty draft)"
 
-    body = (
-        f"Send a pulse notify via {channel}?\n\n"
-        f"Material changes: {delta_count}\n"
-        f"Competitors: {', '.join(names)}\n\n"
-        f"Highlights:\n{highlights}\n\n"
-        "Counterposition brief: attached in this run "
-        "(not posted in full unless included below).\n\n"
-        f"Notify draft:\n{notify_draft}\n\n"
-        "Will not: contact competitors, create accounts, or scrape behind login."
+    body = hygiene_text(
+        ask_body(
+            channel=channel,
+            delta_count=int(delta_count),
+            names=names,
+            highlights=highlights,
+            notify_draft=notify_draft,
+        )
     )
     payload = {
         "title": "Notify about competitor changes?",
@@ -900,6 +879,7 @@ def ask(state: PulseState) -> dict[str, Any]:
         "decision": decision_s,
         "stage_summaries": _append_summary(state, f"ask: {decision_s}"),
     }
+
 
 
 def act(state: PulseState) -> dict[str, Any]:
@@ -929,70 +909,75 @@ def act(state: PulseState) -> dict[str, Any]:
     }
 
 
+
+def _chat_ack_from_state(state: PulseState | dict[str, Any]) -> str:
+    """Rebuild plain-English ack (chat_ack is omitted from MARS stream updates)."""
+    existing = (state.get("chat_ack") or "").strip()
+    if existing:
+        return existing
+    names = list(state.get("watch_names") or [])
+    if not names:
+        names = _watch_names_from(_state_competitors(state))
+    if not names:
+        return ""
+    if len(names) == 1:
+        lead = f"Got it: setting up a watch on **{names[0]}**."
+    else:
+        lead = f"Got it: watching **{', '.join(names)}**."
+    fetch_mode = (
+        "Live public fetch is **on**."
+        if state.get("allow_net")
+        else "Using offline fixtures (live fetch off)."
+    )
+    return (
+        f"{lead}\n{fetch_mode}\n"
+        "I'll pull snapshots and compare against any saved baseline."
+    )
+
+
 def _format_first_run_report(state: PulseState) -> str:
-    ack = state.get("chat_ack") or ""
-    deltas = list(state.get("deltas") or [])
-    names = sorted({d.get("competitor") or "?" for d in deltas})
-    allow_net = bool(state.get("allow_net"))
-    fetch_note = (
-        "Live fetch was on for this run."
-        if allow_net
-        else "Live fetch is off — offline fixtures were used."
-    )
-    lines = []
+    """Ack + one baseline body (prefer draft ``brief_md``, which includes captures)."""
+    ack = _chat_ack_from_state(state)
+    brief = (state.get("brief_md") or "").strip()
+    if brief:
+        body = brief
+    else:
+        deltas = list(state.get("deltas") or [])
+        names = sorted({d.get("competitor") or "?" for d in deltas})
+        if not names:
+            names = list(state.get("watch_names") or []) or _watch_names_from(
+                _state_competitors(state)
+            )
+        gaps = list(state.get("fetch_gaps") or [])
+        body = first_look_message(names, gaps=gaps or None)
     if ack:
-        lines.append(ack)
-        lines.append("")
-    lines.append(
-        f"**First look — baseline established** for {', '.join(names)}."
-    )
-    lines.append(fetch_note)
-    lines.append("")
-    lines.append("What the pages look like right now:")
-    for d in deltas[:8]:
-        lines.append(_delta_bullet(d))
-    lines.append("")
-    lines.append(
-        "Alerts are off unless you ask. Re-run later to see real diffs against this baseline."
-    )
-    return "\n".join(lines)
+        return f"{ack}\n\n{body}"
+    return body
+
 
 
 def _format_quiet_report(state: PulseState) -> str:
     names = list(state.get("watch_names") or [])
     if not names:
         names = _watch_names_from(_state_competitors(state))
-    modules = state.get("modules") or []
-    return (
-        f"**No changes** since the last pulse for {', '.join(names) or 'your watchlist'}.\n\n"
-        f"Modules checked: {', '.join(modules) or '—'}.\n"
-        "Baseline unchanged — nothing worth a notify."
-    )
+    modules = list(state.get("modules") or [])
+    body = quiet_message(names, modules)
+    ack = _chat_ack_from_state(state)
+    if ack:
+        return f"{ack}\n\n{body}"
+    return body
+
 
 
 def _format_material_report(state: PulseState, *, notified: bool = False) -> str:
     deltas = list(state.get("deltas") or [])
-    delta_count = state.get("delta_count") or len(deltas)
     names = sorted({d.get("competitor") or "?" for d in deltas})
-    lines = [
-        f"**{delta_count} material change(s)** across {', '.join(names)}.",
-        "",
-        "What moved:",
-    ]
-    for d in deltas[:8]:
-        lines.append(_delta_bullet(d))
-    counterpositions = list(state.get("counterpositions") or [])
-    if counterpositions:
-        lines.extend(["", "Counterpositions:"])
-        for c in counterpositions[:5]:
-            lines.append(f"- {c}")
     if notified:
-        lines.append(f"\nNotify sent (stub): `{state.get('notify_id') or '—'}`")
-    elif state.get("notify"):
-        lines.append("\nNotify was requested — you can approve on the next material run.")
-    else:
-        lines.append("\nAlerts are off. Say if you want notify on the next pulse.")
-    return "\n".join(lines)
+        return approve_stub_message(str(state.get("notify_id") or ""))
+    if state.get("notify"):
+        return material_chat_message(names, notify_off=False)
+    return material_chat_message(names, notify_off=True)
+
 
 
 def report(state: PulseState) -> dict[str, Any]:
@@ -1017,12 +1002,11 @@ def report(state: PulseState) -> dict[str, Any]:
         next_hint = "Re-run after competitors may have updated their pages."
         out_status = "baseline"
     elif status == "denied":
-        summary = _format_material_report(state, notified=False)
-        summary = "**Brief kept — no notify sent.**\n\n" + summary
+        summary = deny_message()
         next_hint = "Artifacts kept; re-run and approve to stub-notify."
         out_status = "denied"
     elif status == "notified":
-        summary = _format_material_report(state, notified=True)
+        summary = approve_stub_message(str(state.get("notify_id") or ""))
         next_hint = "Review stub notify id in run state."
         out_status = "notified"
     elif material:
@@ -1045,10 +1029,14 @@ def report(state: PulseState) -> dict[str, Any]:
         if a
     ]
 
+    # First-look summary already includes brief_md; material/deny still attach it.
+    attach_brief = state.get("brief_md") or None
+    if out_status == "baseline":
+        attach_brief = None
     return {
         "status": out_status,
         "artifacts": artifacts,
         "next_hint": next_hint,
         "stage_summaries": _append_summary(state, "report: complete"),
-        **_assistant_reply(summary, state.get("brief_md") or None),
+        **_assistant_reply(summary, attach_brief),
     }
