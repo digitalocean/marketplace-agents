@@ -65,7 +65,10 @@ class OutputState(TypedDict, total=False):
 class ResearchState(TypedDict, total=False):
     # MARS chat
     messages: Annotated[list[AnyMessage], add_messages]
-    intent: str  # chat | help | research | other
+    intent: str  # chat | help | research | research_plan | other
+    skip_plan_confirm: bool
+    plan_confirmed: bool
+    pending_research: dict[str, Any]
 
     # Intake
     question: str

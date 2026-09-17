@@ -10,13 +10,16 @@ from sourced_research_desk.nodes import (
     act,
     analyze,
     ask,
+    confirm_plan,
     draft,
     gather,
     intake_node,
     plan,
     report,
+    route_after_confirm_plan,
     route_after_intake,
     should_ask,
+    should_confirm_plan,
 )
 from sourced_research_desk.state import InputState, OutputState, ResearchState
 
@@ -34,6 +37,7 @@ def build_graph() -> StateGraph:
     )
     builder.add_node("intake", intake_node)
     builder.add_node("plan", plan)
+    builder.add_node("confirm_plan", confirm_plan)
     builder.add_node("gather", gather)
     builder.add_node("analyze", analyze)
     builder.add_node("draft", draft)
@@ -47,7 +51,16 @@ def build_graph() -> StateGraph:
         route_after_intake,
         {"end": END, "plan": "plan"},
     )
-    builder.add_edge("plan", "gather")
+    builder.add_conditional_edges(
+        "plan",
+        should_confirm_plan,
+        {"confirm_plan": "confirm_plan", "gather": "gather"},
+    )
+    builder.add_conditional_edges(
+        "confirm_plan",
+        route_after_confirm_plan,
+        {"gather": "gather", "report": "report"},
+    )
     builder.add_edge("gather", "analyze")
     builder.add_edge("analyze", "draft")
     builder.add_conditional_edges(

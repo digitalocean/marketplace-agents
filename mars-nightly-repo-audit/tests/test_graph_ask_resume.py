@@ -34,7 +34,7 @@ def test_ask_payload_contract(monkeypatch):
     _g, _cfg, result = _run_to_interrupt(monkeypatch, "ask-contract")
     assert "__interrupt__" in result
     payload = result["__interrupt__"][0].value
-    assert payload.get("title") == "Want me to open this cleanup PR on acme/widgets?"
+    assert payload.get("title") == "Open cleanup PR?"
     assert payload.get("pending_action") == "open_pr"
     assert payload.get("choices") == ["approve", "deny"]
     body = payload.get("body") or ""
@@ -44,7 +44,7 @@ def test_ask_payload_contract(monkeypatch):
     assert "Changes:" in body
     assert "What it does:" in body
     assert "What it will not do:" in body
-    assert "Evidence:" in body
+    assert "Evidence is in this run's artifacts" in body
     assert "approve" in payload.get("choices", [])
     assert "deny" in payload.get("choices", [])
 

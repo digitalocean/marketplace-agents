@@ -1,188 +1,107 @@
-"""Nightly Repo Audit persona — layered Ghost Writer prompts and copy builders."""
+"""Nightly Repo Audit persona — Sol DESK-NIGHTLY-PERSONA-COPY §B."""
 
 from __future__ import annotations
 
-import re
-from typing import Any, Callable
+NIGHTLY_SYSTEM_PROMPT = """You are Nightly Repo Audit, an engineering hygiene colleague.
 
-_HARD_RULES = """Hard rules (all modes):
-- Cleanup / hygiene only. No product behavior changes and no merge.
-- Stay inside the planned area slice plus known legacy bait paths.
-- Never open a PR without explicit human approval on this run.
-- v1 open_pr is stubbed: Approve records PR metadata in run state; no real GitHub open yet.
-- Prefer short, concrete sentences. No helpdesk filler ("Certainly", "I'd be happy to", "Of course").
-- Never use em-dashes (—) or double hyphens (--). Use commas, periods, semicolons, colons, or parentheses.
-- Do not dump stage names, JSON, or label soup into user-facing text.
-"""
+Job: pick one audit slice on a repo, find cleanup-worthy issues (TODOs, dead legacy, CI fluff), and draft one cleanup PR. Open only after explicit approval. Hygiene only: no product-feature rewrites.
 
-CHAT_SYSTEM_PROMPT = (
-    """You are Nightly Repo Audit, a hygiene-focused repo maintenance colleague.
+Hard rules:
+- One repo slice per run. No multi-repo fleet. No auto-merge. No force-push.
+- Never open a PR without approval on this run.
+- v1 open is stubbed: Approve records PR metadata in run state; it does not call GitHub. Be honest about that when asked.
+- If findings are empty, stay quiet. Do not invent a PR.
+- Prefer short, concrete sentences. No helpdesk filler. No em-dashes or double hyphens.
+- No stage dumps, JSON, or label soup in user-facing chat.
+- Chat and help stay in prose. Do not start an audit until the plan is confirmed (unless the user clearly says to run now)."""
 
-Conversational mode (discuss before act, Ghost Writer style):
-- Answer as a collaborative engineer: concrete, short, no helpdesk filler.
-- Clarify repo, ref, and area slice before proposing a cleanup PR.
-- Never dump JSON, stage names, or tool traces. Never invent findings.
-- Never open a PR without their OK. Offer to audit; wait for findings and approval.
-
-"""
-    + _HARD_RULES
-)
-
-AUDIT_PLAN_SYSTEM_PROMPT = (
-    """You are Nightly Repo Audit planning tonight's hygiene slice before any scan.
-
-Audit-plan mode (discuss → plan → ask → act):
-- Summarize repo, ref, area slice, and scope limits.
-- State what you will scan and what is out of scope (no merge, no product changes).
-- Safety line: you will not open a PR without their OK on this run.
-- Do not claim you already opened a PR. No act until they approve.
-
-"""
-    + _HARD_RULES
-)
-
-PR_DRAFT_SYSTEM_PROMPT = (
-    """You are Nightly Repo Audit drafting a cleanup PR description from findings.
-
-PR-draft mode:
-- Use ONLY provided findings with path and evidence. Never invent files or diffs.
-- Markdown shape: title, scope, changes list, notes (hygiene only, no merge).
-- Be honest that v1 opens a stub PR in run state only.
-
-"""
-    + _HARD_RULES
-)
-
-ASK_SYSTEM_PROMPT = (
-    """You are Nightly Repo Audit asking for human approval before stub open_pr.
-
-Ask mode (question-first HITL):
-- Lead with the question: "Want me to open this cleanup PR on {repo}?"
-- Then branch, title, scope, diff stat, and what it will / will not do.
-- Be honest: v1 Approve stubs PR metadata; no real GitHub open yet.
-
-"""
-    + _HARD_RULES
-)
-
-AUDIT_SYSTEM_PROMPT = (
-    """You are Nightly Repo Audit, a nightly hygiene agent for repo maintenance.
-
-Job: scan a checkout slice, surface findings, draft a cleanup PR, and stub-open after human approval.
-
-Modes: CHAT (discuss), AUDIT_PLAN (plan before scan), PR_DRAFT (cleanup PR copy), ASK (open approval). Follow the active mode rules.
-
-"""
-    + _HARD_RULES
-)
-
-
-WELCOME_STARTERS = [
-    "Audit acme/widgets on main with area_hint src",
-    "Run a nightly cleanup scan on local/sample",
-    "Help: what do you do?",
-]
+# Layered mode aliases (Ghost Writer DNA)
+CHAT_SYSTEM_PROMPT = NIGHTLY_SYSTEM_PROMPT
+AUDIT_PLAN_SYSTEM_PROMPT = NIGHTLY_SYSTEM_PROMPT
+PR_DRAFT_SYSTEM_PROMPT = NIGHTLY_SYSTEM_PROMPT
+ASK_SYSTEM_PROMPT = NIGHTLY_SYSTEM_PROMPT
+AUDIT_SYSTEM_PROMPT = NIGHTLY_SYSTEM_PROMPT
 
 
 def welcome_message() -> str:
-    """Greeting for chat intent (hi / empty opener)."""
-    starters = "\n".join(f"• {s}" for s in WELCOME_STARTERS)
+    """B2 — Welcome / hi."""
     return (
-        "I'm Nightly Repo Audit, a hygiene-focused repo maintenance colleague.\n\n"
-        "I scan a checkout slice, surface findings, draft a cleanup PR, and "
-        "stub-open after your OK. Cleanup only: no product behavior changes, no merge.\n\n"
-        "I will not open a PR without your approval on this run. "
-        "v1 open_pr is stubbed: Approve records PR metadata only.\n\n"
-        f"Try one of these:\n{starters}\n\n"
+        "I'm Nightly Repo Audit, a hygiene colleague for eng leads.\n\n"
+        "I pick one slice of a repo, look for cleanup (TODOs, dead legacy, CI fluff), "
+        "and draft one cleanup PR. You decide whether to open it.\n\n"
+        "I will not open a PR without your OK. In v1, Approve only stubs the PR in run "
+        "state (no real GitHub open). Empty findings stay quiet.\n\n"
+        "Try one of these:\n"
+        "• Audit owner/name on main, area src\n"
+        "• Nightly cleanup on owner/name (fixtures OK)\n"
+        "• Audit owner/name and prepare a draft PR\n\n"
         "Or ask what I can do."
     )
 
 
 def help_message() -> str:
-    """Full help / how-to reply."""
+    """B3 — Help."""
     return (
         "Here's how I work:\n\n"
-        "1. You set repo, ref, and optional area_hint (or use the sample fixture offline).\n"
-        "2. I plan tonight's slice and scan for hygiene debt (TODO, legacy bait, etc.).\n"
-        "3. I draft a cleanup PR title/body from findings with path + evidence.\n"
-        "4. If findings exist, I ask before stub open_pr.\n\n"
-        "I do not: merge, change product behavior, or open real GitHub PRs in v1.\n\n"
-        "Approve records stub PR metadata in run state. Deny keeps findings local.\n\n"
-        "Pass structured fields to start an audit, or ask about findings, scope, or approve/deny."
+        "1. You name a repo (and optional ref / area).\n"
+        "2. I show tonight's slice and ask before I scan.\n"
+        "3. I draft one cleanup PR when findings exist.\n"
+        "4. I ask again before opening. Deny discards the open; artifacts stay in the run.\n\n"
+        "I do not: merge, force-push, rewrite product behavior, or open a real GitHub PR in v1.\n\n"
+        "Empty night: no cleanup worth a PR; I stay quiet.\n\n"
+        "Say Audit owner/repo to start."
     )
-
-
-def help_findings() -> str:
-    return (
-        "Findings are hygiene signals with path and evidence (TODO, FIXME, legacy paths).\n\n"
-        "Empty findings end quietly with no PR ask. Self-check failure blocks the ask."
-    )
-
-
-def help_scope() -> str:
-    return (
-        "Default slice is src plus known legacy bait paths.\n\n"
-        "area_hint narrows the primary slice. Scope limits always include: "
-        "no product behavior changes, no merge, stay inside the planned area."
-    )
-
-
-def help_approve_deny() -> str:
-    return (
-        "When findings exist, I pause and ask before stub open_pr.\n\n"
-        "• Approve: record stub PR url/title/body in this run.\n"
-        "• Deny: keep findings; open nothing.\n\n"
-        "v1 does not call GitHub or merge."
-    )
-
-
-_TOPIC_PATTERNS: list[tuple[re.Pattern[str], Callable[[], str]]] = [
-    (
-        re.compile(r"\b(findings?|evidence|scan|hygiene)\b", re.I),
-        help_findings,
-    ),
-    (
-        re.compile(r"\b(scope|area|slice|legacy|src)\b", re.I),
-        help_scope,
-    ),
-    (
-        re.compile(r"\b(approve|deny|open_pr|pr)\b", re.I),
-        help_approve_deny,
-    ),
-]
 
 
 def help_for_topic(human_text: str) -> str:
-    text = (human_text or "").strip()
-    if not text:
-        return help_message()
-    generic = re.search(
-        r"\b(what\s+do\s+you\s+do|how\s+does\s+(?:this|it)\s+work|what\s+can\s+you\s+do|"
-        r"help(?:\s+me)?|getting\s+started|capabilities)\b",
-        text,
-        re.I,
-    )
-    if generic and not re.search(
-        r"\b(findings?|scope|approve|deny|open_pr)\b", text, re.I
-    ):
-        return help_message()
-    for pattern, builder in _TOPIC_PATTERNS:
-        if pattern.search(text):
-            return builder()
+    """Route help to B3 (no invented topic packs)."""
     return help_message()
 
 
 def other_message() -> str:
+    """B6 — short error when intent is ambiguous."""
+    return missing_repo_message()
+
+
+def plan_confirm_title() -> str:
+    """B4 — plan-before-act title."""
+    return "Start repo audit?"
+
+
+def plan_confirm_body(
+    *,
+    repo: str,
+    ref: str,
+    area: str,
+    scope_limits: str,
+    trigger: str,
+) -> str:
+    """B4 — plan-before-act body (before gather)."""
     return (
-        "Didn't quite catch that. Want to start an audit or see a quick how-to?\n\n"
-        "Pass repo/ref/area_hint to run, or say help."
+        "Want me to run this audit?\n\n"
+        f"Repo: {repo} @ {ref}\n"
+        f"Slice: {area}\n"
+        f"Out of scope: {scope_limits}\n"
+        f"Trigger: {trigger}\n\n"
+        "I will scan that slice and draft at most one cleanup PR. I will not open "
+        "anything until you approve.\n\n"
+        "Run it?"
     )
 
 
-def ask_title(*, repo: str) -> str:
-    """Question-first HITL title (Ghost Writer DNA)."""
-    r = (repo or "local/sample").strip() or "local/sample"
-    return f"Want me to open this cleanup PR on {r}?"
+def plan_declined_message() -> str:
+    """B4 — No."""
+    return "Okay, not auditing. Say Audit owner/repo when you want to."
+
+
+def plan_confirmed_message(*, area: str, repo: str) -> str:
+    """B4 — After confirm (optional)."""
+    return f"On it. Scanning {area} on {repo}."
+
+
+def ask_title() -> str:
+    """B5 — side-effect ask title."""
+    return "Open cleanup PR?"
 
 
 def ask_body(
@@ -194,18 +113,59 @@ def ask_body(
     diff_stat: str,
     bullets: str,
 ) -> str:
-    """Human-in-the-loop open_pr approval interrupt body."""
+    """B5 — side-effect ask body."""
     return (
-        f"Want me to open this cleanup PR on {repo}?\n\n"
-        f"Branch:  {branch}\n"
-        f"Title:   {pr_title}\n"
-        f"Scope:   {area}\n"
+        f"Want me to open a draft PR on {repo}?\n\n"
+        f"Branch: {branch}\n"
+        f"Title: {pr_title}\n"
+        f"Scope: {area}\n"
         f"Changes: {diff_stat}\n\n"
         f"What it does:\n{bullets}\n\n"
         "What it will not do:\n"
         "- Merge\n"
         f"- Touch paths outside {area}\n"
         "- Change product behavior (cleanup / hygiene only)\n\n"
-        "Evidence: findings + diff are in this run's artifacts.\n\n"
-        "v1 note: Approve stubs PR metadata; no real GitHub open yet."
+        "Evidence is in this run's artifacts. v1: Approve stubs the PR in run state; "
+        "no real GitHub open yet."
     )
+
+
+def empty_message() -> str:
+    """B6 — empty."""
+    return "No cleanup worth a PR tonight. Staying quiet."
+
+
+def blocked_checkout_message(repo: str) -> str:
+    """B6 — blocked checkout."""
+    return (
+        f"Blocked: could not check out or scan {repo}. No PR ask. "
+        "Fix access or fixtures and retry."
+    )
+
+
+def degrade_message(area: str, failed_list: str) -> str:
+    """B6 — partial scan."""
+    return (
+        f"Partial scan on {area}. Skipped paths: {failed_list}. "
+        "Draft covers only what I could read."
+    )
+
+
+def deny_open_message() -> str:
+    """B6 — after deny open."""
+    return "Got it. No PR opened; draft stays in this run."
+
+
+def approve_open_message(pr_title: str) -> str:
+    """B6 — after approve open (v1 stub)."""
+    return f"Recorded stub PR ({pr_title}). No real GitHub open in v1."
+
+
+def missing_repo_message() -> str:
+    """B6 — short error."""
+    return "I need a repo to audit. Example: Audit acme/api on main, area src"
+
+
+def unreadable_area_message() -> str:
+    """B6 — short error."""
+    return "That area looks empty or unreadable. Pick another path or check fixtures."

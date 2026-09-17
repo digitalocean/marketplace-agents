@@ -15,7 +15,23 @@ from sourced_research_desk.hygiene import hygiene_text
 from sourced_research_desk.intent import classify_intent
 from sourced_research_desk.llm import harness_env_available
 from sourced_research_desk.llm_http import plan_from_llm, suggest_urls_from_llm
-from sourced_research_desk.persona import ask_body, ask_title, research_plan_summary
+from sourced_research_desk.persona import (
+    approve_send_message,
+    ask_body,
+    ask_title,
+    blocked_unsourced_message,
+    deny_send_message,
+    empty_message,
+    fetch_failed_message,
+    missing_question_message,
+    outbound_label,
+    plan_angle_from_subquestions,
+    plan_confirm_body,
+    plan_confirm_title,
+    plan_declined_message,
+    degrade_message,
+    research_only_success_message,
+)
 from sourced_research_desk.state import ResearchState
 
 ASSISTANT_DISPLAY_NAME = "Sourced Research Desk"
@@ -81,8 +97,15 @@ def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
 def intake(state: ResearchState) -> dict[str, Any]:
     human_text = _human_message_text(state.get("messages"))
     question = (state.get("question") or "").strip()
+    pending = state.get("pending_research")
+    skip_plan_confirm = not bool(human_text.strip())
+
     if human_text.strip():
-        intent = classify_intent(human_text, has_question=bool(question))
+        intent = classify_intent(
+            human_text,
+            has_question=bool(question),
+            pending_research=pending if isinstance(pending, dict) else None,
+        )
         if intent in {"chat", "help", "other"}:
             reply = conversational_reply(intent, human_text)
             return {
@@ -93,11 +116,19 @@ def intake(state: ResearchState) -> dict[str, Any]:
                 "unsourced": False,
                 **_assistant_reply(reply, None),
             }
-        if not question:
-            question = human_text.strip()
+        if intent == "research" and isinstance(pending, dict):
+            question = (pending.get("question") or question).strip()
+            skip_plan_confirm = True
+            research_intent = "research"
+        else:
+            if not question:
+                question = human_text.strip()
+            research_intent = "research_plan" if human_text.strip() else "research"
+    else:
+        research_intent = "research"
 
     if not question:
-        blocked = "Blocked: missing question."
+        blocked = missing_question_message()
         return {
             "status": "blocked",
             "human_summary": blocked,
@@ -112,7 +143,7 @@ def intake(state: ResearchState) -> dict[str, Any]:
     audience = (state.get("audience") or "operators").strip()
     summary = f"Researching: {question}"
     return {
-        "intent": "research",
+        "intent": research_intent,
         "question": question,
         "audience": audience,
         "outbound": outbound,
@@ -127,6 +158,8 @@ def intake(state: ResearchState) -> dict[str, Any]:
         "sent": False,
         "skipped": False,
         "unsourced": False,
+        "skip_plan_confirm": skip_plan_confirm,
+        "plan_confirmed": bool(skip_plan_confirm),
     }
 
 
@@ -135,6 +168,8 @@ def intake_node(state: ResearchState) -> dict[str, Any]:
 
 
 def route_after_intake(state: ResearchState) -> str:
+    if state.get("status") == "blocked":
+        return "end"
     intent = (state.get("intent") or "research").strip().lower()
     if intent in {"chat", "help", "other"}:
         return "end"
@@ -177,23 +212,90 @@ def plan(state: ResearchState) -> dict[str, Any]:
         else:
             subquestions, search_queries = _plan_deterministic(question)
 
-    outbound = (state.get("outbound") or "none").strip().lower()
+    ob, suffix = outbound_label(
+        (state.get("outbound") or "none").strip().lower(),
+        (state.get("destination") or "").strip(),
+    )
+    angle = plan_angle_from_subquestions(subquestions)
     summary = hygiene_text(
-        research_plan_summary(
+        plan_confirm_body(
             question=question,
-            subquestions=subquestions,
-            search_queries=search_queries,
-            outbound=outbound,
-            destination=(state.get("destination") or "").strip(),
-            allow_net=not _deterministic_mode(state),
+            plan_angle_or_subquestions=angle,
+            outbound=ob,
+            destination_suffix=suffix,
         )
     )
+    pending = {
+        "question": question,
+        "subquestions": subquestions,
+        "search_queries": search_queries,
+        "outbound": state.get("outbound") or "none",
+        "destination": state.get("destination") or "",
+        "audience": state.get("audience") or "operators",
+        "seed_urls": list(state.get("seed_urls") or []),
+        "fixture_sources": list(state.get("fixture_sources") or []),
+    }
     return {
         "subquestions": subquestions,
         "search_queries": search_queries,
+        "pending_research": pending,
         "human_summary": summary,
-        "stage_summaries": _append_summary(state, f"plan: {summary}"),
+        "stage_summaries": _append_summary(state, "plan: research plan ready"),
     }
+
+
+def should_confirm_plan(state: ResearchState) -> str:
+    if state.get("skip_plan_confirm") or state.get("plan_confirmed"):
+        return "gather"
+    return "confirm_plan"
+
+
+def confirm_plan(state: ResearchState) -> dict[str, Any]:
+    """A4 — interrupt before gather."""
+    from langgraph.types import interrupt
+
+    question = state.get("question") or ""
+    angle = plan_angle_from_subquestions(list(state.get("subquestions") or []))
+    ob, suffix = outbound_label(
+        (state.get("outbound") or "none").strip().lower(),
+        (state.get("destination") or "").strip(),
+    )
+    body = hygiene_text(
+        plan_confirm_body(
+            question=question,
+            plan_angle_or_subquestions=angle,
+            outbound=ob,
+            destination_suffix=suffix,
+        )
+    )
+    payload = {
+        "title": plan_confirm_title(),
+        "body": body,
+        "pending_action": "start_research",
+        "choices": ["approve", "deny"],
+    }
+    decision = interrupt(payload)
+    if isinstance(decision, dict):
+        decision = decision.get("decision") or decision.get("value") or "deny"
+    decision_s = str(decision).strip().lower()
+    if decision_s not in {"approve", "deny"}:
+        decision_s = "deny"
+    if decision_s == "approve":
+        return {
+            "plan_confirmed": True,
+            "stage_summaries": _append_summary(state, "confirm_plan: approve"),
+        }
+    return {
+        "plan_confirmed": False,
+        "status": "plan_denied",
+        "stage_summaries": _append_summary(state, "confirm_plan: deny"),
+    }
+
+
+def route_after_confirm_plan(state: ResearchState) -> str:
+    if state.get("plan_confirmed"):
+        return "gather"
+    return "report"
 
 
 def _parse_plan_llm(text: str, question: str) -> tuple[list[str], list[str]]:
@@ -606,7 +708,7 @@ def ask(state: ResearchState) -> dict[str, Any]:
         )
     )
     payload = {
-        "title": ask_title(channel=channel),
+        "title": ask_title(),
         "body": body,
         "pending_action": "send_outbound",
         "channel": channel,
@@ -637,7 +739,7 @@ def act(state: ResearchState) -> dict[str, Any]:
             "skipped": True,
             "status": "denied",
             "message_id": "",
-            "human_summary": "Denied — no send; brief remains in run artifacts.",
+            "human_summary": deny_send_message(),
             "stage_summaries": _append_summary(state, "act: denied — no send"),
         }
     # Stub send only — never real Slack/email
@@ -647,7 +749,7 @@ def act(state: ResearchState) -> dict[str, Any]:
         "skipped": False,
         "status": "ok",
         "message_id": message_id,
-        "human_summary": f"Stub send recorded (message_id={message_id}).",
+        "human_summary": approve_send_message(message_id),
         "stage_summaries": _append_summary(state, f"act: stub sent {message_id}"),
     }
 
@@ -655,61 +757,37 @@ def act(state: ResearchState) -> dict[str, Any]:
 def report(state: ResearchState) -> dict[str, Any]:
     outbound = (state.get("outbound") or "none").lower()
     status = state.get("status") or "ok"
-    claim_count = state.get("claim_count") or len(state.get("claims") or [])
-    conflicts_n = len(state.get("conflicts") or [])
-    question = state.get("question") or ""
+    sources = list(state.get("sources") or [])
+    failed = [s.get("url") or "?" for s in sources if not s.get("ok")]
 
-    if status == "blocked":
+    if status == "plan_denied":
+        summary = plan_declined_message()
+    elif status == "blocked":
         summary = (
-            "Sourced Research Desk — blocked\n\n"
-            f"Question: {question}\n"
-            "Reason: unsourced claims or intake failure. No outbound ask."
+            blocked_unsourced_message()
+            if state.get("unsourced")
+            else missing_question_message()
         )
     elif status == "empty":
         summary = (
-            "Sourced Research Desk — empty\n\n"
-            f"Question: {question}\n"
-            "No sourced claims to brief."
+            fetch_failed_message()
+            if sources and not any(s.get("ok") for s in sources)
+            else empty_message()
         )
     elif status == "denied":
-        summary = (
-            "Sourced Research Desk — denied\n\n"
-            f"Question: {question}\n"
-            f"Claims:   {claim_count} with urls + dates\n"
-            "Outbound: not sent; brief kept in artifacts."
-        )
-    elif outbound == "none" or not state.get("sent"):
-        if outbound != "none" and state.get("sent"):
-            summary = ""  # fall through
-        else:
-            summary = (
-                "Research brief ready (not sent).\n\n"
-                f"Question: {question}\n"
-                f"Claims:   {claim_count} with urls + dates\n"
-                f"Conflicts: {conflicts_n}\n\n"
-                "Open the brief artifact in this run to copy or share yourself."
-            )
+        summary = deny_send_message()
+    elif state.get("sent"):
+        summary = approve_send_message(str(state.get("message_id") or "stub"))
+    elif outbound == "none":
+        summary = research_only_success_message()
     else:
-        summary = (
-            "Sourced Research Desk — done\n\n"
-            f"Status: sent (stub)\n"
-            f"Question: {question}\n"
-            f"Claims: {claim_count}\n"
-            f"Message id: {state.get('message_id') or '—'}"
-        )
-
-    if state.get("sent"):
-        summary = (
-            "Sourced Research Desk — done\n\n"
-            f"Status: sent (stub)\n"
-            f"Question: {question}\n"
-            f"Claims: {claim_count}\n"
-            f"Message id: {state.get('message_id') or '—'}"
-        )
+        summary = research_only_success_message()
 
     attach_brief = state.get("brief_md") or None
-    if status in {"chat", "help", "other"}:
+    if status in {"chat", "help", "other", "plan_denied"}:
         attach_brief = None
+    if failed and attach_brief and status not in {"empty", "blocked", "plan_denied"}:
+        summary = degrade_message(", ".join(failed[:5]))
     return {
         "human_summary": hygiene_text(summary),
         "status": status,

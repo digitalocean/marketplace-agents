@@ -17,6 +17,11 @@ _CHAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PLAN_CONFIRM_RE = re.compile(
+    r"^(?:yes|y|go|run\s+it|do\s+it|looks\s+good|ok|okay)\s*[!.?]*$",
+    re.IGNORECASE,
+)
+
 _HELP_RE = re.compile(
     r"\b("
     r"what\s+do\s+you\s+do|"
@@ -55,15 +60,29 @@ def is_help_message(text: str) -> bool:
     return bool(_HELP_RE.search(stripped))
 
 
-def classify_intent(human_text: str, *, has_question: bool = False) -> str:
-    """Return chat | help | research | other."""
+def is_plan_confirm(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    return bool(_PLAN_CONFIRM_RE.match(stripped))
+
+
+def classify_intent(
+    human_text: str,
+    *,
+    has_question: bool = False,
+    pending_research: dict | None = None,
+) -> str:
+    """Return chat | help | research | research_plan | other."""
     text = (human_text or "").strip()
+    if pending_research and is_plan_confirm(text):
+        return "research"
     if is_help_message(text):
         return "help"
     if is_chat_message(text):
         return "chat"
     if text:
-        return "research"
+        return "research_plan"
     if has_question:
         return "research"
     return "other"

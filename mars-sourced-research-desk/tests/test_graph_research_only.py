@@ -56,7 +56,12 @@ def test_research_only_produces_brief_without_interrupt(monkeypatch):
         assert c.get("date"), "claim missing date"
     assert result.get("status") in {"ok", "empty"}
     assert result.get("sent") is not True
-    assert "not sent" in assistant_summary(result).lower() or result.get("outbound") == "none"
+    summary = assistant_summary(result).lower()
+    assert (
+        "kept it local" in summary
+        or "brief ready" in summary
+        or result.get("outbound") == "none"
+    )
 
 
 def test_claims_map_into_brief_citations(monkeypatch):

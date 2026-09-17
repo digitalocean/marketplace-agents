@@ -10,7 +10,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from nightly_repo_audit.converse import conversational_reply
 from nightly_repo_audit.hygiene import hygiene_text
 from nightly_repo_audit.intent import classify_intent
-from nightly_repo_audit.persona import ask_body, ask_title
+from nightly_repo_audit.persona import (
+    approve_open_message,
+    ask_body,
+    ask_title,
+    blocked_checkout_message,
+    deny_open_message,
+    empty_message,
+    plan_confirm_body,
+    plan_confirm_title,
+    plan_declined_message,
+)
 from nightly_repo_audit.repo_scan import default_fixture_path, scan_repo
 from nightly_repo_audit.state import AuditState
 
@@ -78,8 +88,15 @@ def _normalize_decision(raw: Any) -> str:
 def intake(state: AuditState) -> dict[str, Any]:
     human_text = _human_message_text(state.get("messages"))
     programmatic = _programmatic_audit(state) and not human_text.strip()
+    pending = state.get("pending_audit")
+    skip_plan_confirm = not bool(human_text.strip())
+
     if human_text.strip() or state.get("messages"):
-        intent = classify_intent(human_text, programmatic_audit=programmatic)
+        intent = classify_intent(
+            human_text,
+            programmatic_audit=programmatic,
+            pending_audit=pending if isinstance(pending, dict) else None,
+        )
         if intent in {"chat", "help", "other"}:
             reply = conversational_reply(intent, human_text)
             return {
@@ -89,19 +106,29 @@ def intake(state: AuditState) -> dict[str, Any]:
                 "findings": [],
                 **_assistant_reply(reply),
             }
+        if intent == "audit" and isinstance(pending, dict):
+            skip_plan_confirm = True
+            audit_intent = "audit"
+        else:
+            audit_intent = "audit_plan" if human_text.strip() else "audit"
+    else:
+        audit_intent = "audit"
 
     if state.get("force_blocked"):
+        repo = state.get("repo") or "local/sample"
+        blocked = blocked_checkout_message(repo)
         return {
             "status": "blocked",
-            "repo": state.get("repo") or "local/sample",
+            "repo": repo,
             "ref": state.get("ref") or "main",
             "trigger": state.get("trigger") or "manual",
-            "human_summary": "Blocked: checkout/tools unavailable.",
+            "human_summary": blocked,
             "stage_summaries": _append_summary(
                 state, "intake: blocked — checkout/tools unavailable"
             ),
             "findings": [],
             "skipped": False,
+            **_assistant_reply(blocked),
         }
 
     repo = (state.get("repo") or "local/sample").strip()
@@ -116,7 +143,7 @@ def intake(state: AuditState) -> dict[str, Any]:
 
     summary = f"Auditing `{repo}` @ `{ref}`."
     return {
-        "intent": "audit",
+        "intent": audit_intent,
         "repo": repo,
         "ref": ref,
         "trigger": trigger,
@@ -127,6 +154,8 @@ def intake(state: AuditState) -> dict[str, Any]:
         "stage_summaries": _append_summary(state, f"intake: {summary}"),
         "skipped": False,
         "findings": [],
+        "skip_plan_confirm": skip_plan_confirm,
+        "plan_confirmed": bool(skip_plan_confirm),
     }
 
 
@@ -135,6 +164,8 @@ def intake_node(state: AuditState) -> dict[str, Any]:
 
 
 def route_after_intake(state: AuditState) -> str:
+    if state.get("status") == "blocked":
+        return "end"
     intent = (state.get("intent") or "audit").strip().lower()
     if intent in {"chat", "help", "other"}:
         return "end"
@@ -161,14 +192,85 @@ def plan(state: AuditState) -> dict[str, Any]:
         "No merge",
         f"Stay inside `{area}` (plus known legacy bait paths)",
     ]
-    summary = f"Tonight's slice: **{area}**. Out of scope: {', '.join(scope_limits)}."
+    scope_text = ", ".join(scope_limits)
+    repo = state.get("repo") or "local/sample"
+    ref = state.get("ref") or "main"
+    trigger = state.get("trigger") or "manual"
+    summary = hygiene_text(
+        plan_confirm_body(
+            repo=repo,
+            ref=ref,
+            area=area,
+            scope_limits=scope_text,
+            trigger=trigger,
+        )
+    )
+    pending = {
+        "repo": repo,
+        "ref": ref,
+        "trigger": trigger,
+        "area": area,
+        "area_hint": state.get("area_hint") or "",
+        "fixture_path": state.get("fixture_path") or "",
+    }
     return {
         "area": area,
         "rationale": rationale,
         "scope_limits": scope_limits,
+        "pending_audit": pending,
         "human_summary": summary,
         "stage_summaries": _append_summary(state, f"plan: area={area}"),
     }
+
+
+def should_confirm_plan(state: AuditState) -> str:
+    if state.get("skip_plan_confirm") or state.get("plan_confirmed"):
+        return "gather"
+    return "confirm_plan"
+
+
+def confirm_plan(state: AuditState) -> dict[str, Any]:
+    """B4 — interrupt before gather."""
+    from langgraph.types import interrupt
+
+    repo = state.get("repo") or "local/sample"
+    ref = state.get("ref") or "main"
+    area = state.get("area") or "src"
+    scope_text = ", ".join(list(state.get("scope_limits") or []))
+    trigger = state.get("trigger") or "manual"
+    body = hygiene_text(
+        plan_confirm_body(
+            repo=repo,
+            ref=ref,
+            area=area,
+            scope_limits=scope_text,
+            trigger=trigger,
+        )
+    )
+    payload = {
+        "title": plan_confirm_title(),
+        "body": body,
+        "pending_action": "start_audit",
+        "choices": ["approve", "deny"],
+    }
+    decision = interrupt(payload)
+    decision_s = _normalize_decision(decision)
+    if decision_s == "approve":
+        return {
+            "plan_confirmed": True,
+            "stage_summaries": _append_summary(state, "confirm_plan: approve"),
+        }
+    return {
+        "plan_confirmed": False,
+        "status": "plan_denied",
+        "stage_summaries": _append_summary(state, "confirm_plan: deny"),
+    }
+
+
+def route_after_confirm_plan(state: AuditState) -> str:
+    if state.get("plan_confirmed"):
+        return "gather"
+    return "report"
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +289,7 @@ def gather(state: AuditState) -> dict[str, Any]:
             "checkout_path": str(checkout),
             "files_touched_count": 0,
             "commands_run": ["scan_repo (failed: missing path)"],
-            "human_summary": f"Blocked: checkout path missing ({checkout}).",
+            "human_summary": blocked_checkout_message(state.get("repo") or "local/sample"),
             "stage_summaries": _append_summary(
                 state, "gather: blocked — missing checkout"
             ),
@@ -404,7 +506,7 @@ def ask(state: AuditState) -> dict[str, Any]:
         )
     )
     payload = {
-        "title": ask_title(repo=repo),
+        "title": ask_title(),
         "body": body,
         "pending_action": "open_pr",
         "choices": ["approve", "deny"],
@@ -427,7 +529,7 @@ def act(state: AuditState) -> dict[str, Any]:
             "skipped": True,
             "status": "denied",
             "pr_url": "",
-            "human_summary": "Denied — no PR opened.",
+            "human_summary": deny_open_message(),
             "stage_summaries": _append_summary(state, "act: denied — no PR"),
             # Clear any accidental PR metadata
             "pr_number": 0,
@@ -436,14 +538,15 @@ def act(state: AuditState) -> dict[str, Any]:
     # Stub open_pr — record metadata in state only (no real GitHub)
     pr_number = 9001
     pr_url = f"https://example.com/{state.get('repo') or 'local/sample'}/pull/{pr_number}"
+    pr_title = state.get("pr_title") or ""
     return {
         "skipped": False,
         "status": "opened",
         "pr_number": pr_number,
         "pr_url": pr_url,
-        "pr_title": state.get("pr_title") or "",
+        "pr_title": pr_title,
         "pr_body_md": state.get("pr_body_md") or "",
-        "human_summary": f"Opened PR #{pr_number} (stub).",
+        "human_summary": approve_open_message(pr_title),
         "stage_summaries": _append_summary(
             state, f"act: stub opened PR #{pr_number}"
         ),
@@ -453,60 +556,25 @@ def act(state: AuditState) -> dict[str, Any]:
 def report(state: AuditState) -> dict[str, Any]:
     status = state.get("status") or "ok"
     repo = state.get("repo") or "local/sample"
-    area = state.get("area") or "—"
     findings_n = len(state.get("findings") or [])
-    self_check = "pass" if state.get("self_check_pass", True) else "fail"
-    pr = state.get("pr_url") or "—"
 
-    if status == "empty":
-        summary = (
-            "Nightly Repo Audit — done\n\n"
-            "Status: empty\n"
-            f"Repo:   {repo}\n"
-            f"Slice:  {area}\n"
-            "PR:     —\n\n"
-            "No cleanup worth a PR tonight."
-        )
+    if status == "plan_denied":
+        summary = plan_declined_message()
+        next_hint = "Say Audit owner/repo when you want to run."
+    elif status == "empty":
+        summary = empty_message()
         next_hint = "Re-run when the slice has hygiene debt."
     elif status == "blocked":
-        summary = (
-            "Nightly Repo Audit — done\n\n"
-            "Status: blocked\n"
-            f"Repo:   {repo}\n"
-            f"Slice:  {area}\n"
-            "PR:     —\n\n"
-            "Checkout/tools failed or self-check failed; no ask."
-        )
+        summary = blocked_checkout_message(repo)
         next_hint = "Fix checkout path / tools and retry."
     elif status == "denied":
-        summary = (
-            "Nightly Repo Audit — done\n\n"
-            "Status: denied\n"
-            f"Repo:   {repo}\n"
-            f"Slice:  {area}\n"
-            "PR:     —\n\n"
-            f"Findings: {findings_n}  ·  Self-check: {self_check}"
-        )
+        summary = deny_open_message()
         next_hint = "Artifacts kept; re-run and approve to open stub PR."
     elif status == "opened":
-        summary = (
-            "Nightly Repo Audit — done\n\n"
-            "Status: opened\n"
-            f"Repo:   {repo}\n"
-            f"Slice:  {area}\n"
-            f"PR:     {pr}\n\n"
-            f"Findings: {findings_n}  ·  Self-check: {self_check}"
-        )
+        summary = approve_open_message(state.get("pr_title") or "cleanup PR")
         next_hint = "Review the stub PR metadata in run state."
     else:
-        summary = (
-            "Nightly Repo Audit — done\n\n"
-            f"Status: {status}\n"
-            f"Repo:   {repo}\n"
-            f"Slice:  {area}\n"
-            f"PR:     {pr}\n\n"
-            f"Findings: {findings_n}  ·  Self-check: {self_check}"
-        )
+        summary = empty_message()
         next_hint = "Inspect stage_summaries for details."
 
     artifacts = [

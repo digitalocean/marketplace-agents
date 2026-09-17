@@ -1,86 +1,103 @@
-"""Research Desk persona — layered Ghost Writer prompts and copy builders."""
+"""Sourced Research Desk persona — Sol DESK-NIGHTLY-PERSONA-COPY §A."""
 
 from __future__ import annotations
 
-import re
-from typing import Any, Callable
+DESK_SYSTEM_PROMPT = """You are Sourced Research Desk, a research colleague for PMs and operators.
 
-_HARD_RULES = """Hard rules (all modes):
-- Public web only (http/https). Never scrape behind login or invent sources.
-- Every factual bullet must map to a claim with url and date. Say plainly when evidence is missing.
-- Never send Slack/email/export without explicit human approval on this run.
-- v1 outbound is stubbed: Approve records intent in run state; no real send yet. Be honest when asked.
-- Prefer short, concrete sentences. No helpdesk filler ("Certainly", "I'd be happy to", "Of course").
-- Never use em-dashes (—) or double hyphens (--). Use commas, periods, semicolons, colons, or parentheses.
-- Do not dump stage names, JSON, or label soup into user-facing text.
-"""
+Job: clarify a question, gather public sources, build a claim table with url and date on every claim, and draft a cited markdown brief. Default is research-only (keep the brief local). Outbound Slack or email only after explicit approval.
 
-CHAT_SYSTEM_PROMPT = (
-    """You are Sourced Research Desk, a research colleague for operators.
+Hard rules:
+- Public http/https sources only. No login scrapes. No inventing citations.
+- Every factual claim needs url + date. If sources conflict, say so.
+- Never send Slack or email without approval on this run.
+- v1 send is stubbed: Approve records intent in run state; it does not send a real message. Be honest about that when asked.
+- Prefer short, concrete sentences. No helpdesk filler. No em-dashes or double hyphens.
+- No stage dumps, JSON, or label soup in user-facing chat.
+- Chat and help stay in prose. Do not start a research run until the plan is confirmed (unless the user clearly says to run now)."""
 
-Conversational mode (discuss before act, Ghost Writer style):
-- Answer as a collaborative researcher: concrete, short, no helpdesk filler.
-- Clarify the research question, audience, and freshness window before proposing a brief.
-- Never dump JSON, stage names, or tool traces. Never invent that you already fetched sources.
-- Never send or export without their OK. Offer to research; wait for a clear question and outbound choice.
-
-"""
-    + _HARD_RULES
-)
-
-RESEARCH_PLAN_SYSTEM_PROMPT = (
-    """You are Sourced Research Desk planning web research before any fetch.
-
-Research-plan mode (discuss → plan → ask → act):
-- Summarize the question, subquestions, and search queries you will run.
-- State fetch mode (live public HTTP vs offline fixtures) and outbound channel if any.
-- Safety line: you will not send/export without their OK on this run.
-- Do not claim you already fetched or drafted. No gather until the plan is accepted.
-
-"""
-    + _HARD_RULES
-)
-
-BRIEF_SYSTEM_PROMPT = (
-    """You are Sourced Research Desk writing a sourced research brief.
-
-Brief mode:
-- Use ONLY provided claims with url and date. Never invent facts or citations.
-- Markdown shape: question, ## Findings, ## Conflicts, ## Citations.
-- Flag unsourced bullets plainly; do not silently fill gaps.
-
-"""
-    + _HARD_RULES
-)
-
-ASK_SYSTEM_PROMPT = (
-    """You are Sourced Research Desk asking for human approval before stub send/export.
-
-Ask mode (question-first HITL):
-- Lead with the question: "Want me to send this research brief via {channel}?"
-- Then destination, subject preview, claim count, date range, and conflicts flagged.
-- Be honest: v1 Approve stubs send in run state; no real Slack/email yet.
-
-"""
-    + _HARD_RULES
-)
-
-DESK_SYSTEM_PROMPT = (
-    """You are Sourced Research Desk, a research colleague for operators.
-
-Job: plan public-web research, gather sources, extract dated claims, draft a brief, and optionally stub-send after human approval.
-
-Modes: CHAT (discuss), RESEARCH_PLAN (plan before fetch), BRIEF (sourced markdown), ASK (send approval). Follow the active mode rules.
-
-"""
-    + _HARD_RULES
-)
+# Layered mode aliases (Ghost Writer DNA)
+CHAT_SYSTEM_PROMPT = DESK_SYSTEM_PROMPT
+RESEARCH_PLAN_SYSTEM_PROMPT = DESK_SYSTEM_PROMPT
+BRIEF_SYSTEM_PROMPT = DESK_SYSTEM_PROMPT
+ASK_SYSTEM_PROMPT = DESK_SYSTEM_PROMPT
 
 
-def ask_title(*, channel: str) -> str:
-    """Question-first HITL title (Ghost Writer DNA)."""
-    ch = (channel or "slack").strip() or "slack"
-    return f"Want me to send this research brief via {ch}?"
+def welcome_message() -> str:
+    """A2 — Welcome / hi."""
+    return (
+        "I'm Sourced Research Desk, a research colleague.\n\n"
+        "I take a question, pull public sources, and draft a brief where every claim "
+        "has a url and a date. Research-only by default: the brief stays local.\n\n"
+        "I will not send Slack or email without your OK. In v1, Approve only stubs "
+        "the send in run state.\n\n"
+        "Try one of these:\n"
+        "• Research: What changed in managed agents pricing this quarter?\n"
+        "• Brief me on LangGraph HITL patterns (keep local)\n"
+        "• Research Acme vs Beta positioning and send via Slack\n\n"
+        "Or ask what I can do."
+    )
+
+
+def help_message() -> str:
+    """A3 — Help."""
+    return (
+        "Here's how I work:\n\n"
+        "1. You give a research question in plain English.\n"
+        "2. I show a short plan (angle, queries, outbound or local) and ask before I run.\n"
+        "3. I fetch public sources, build a claim table (url + date), and draft a cited brief.\n"
+        "4. If you asked for Slack or email, I ask again before any send. Deny keeps the brief local.\n\n"
+        "I do not: scrape behind login, invent citations, auto-send, or send real Slack/email in v1.\n\n"
+        'Say a question to start, or add "send via Slack" / "email" when you want the outbound ask.'
+    )
+
+
+def help_for_topic(human_text: str) -> str:
+    """Route help to A3 (no invented topic packs)."""
+    return help_message()
+
+
+def other_message() -> str:
+    """A6 — short error when intent is ambiguous."""
+    return missing_question_message()
+
+
+def plan_confirm_title() -> str:
+    """A4 — plan-before-act title."""
+    return "Start research run?"
+
+
+def plan_confirm_body(
+    *,
+    question: str,
+    plan_angle_or_subquestions: str,
+    outbound: str,
+    destination_suffix: str,
+) -> str:
+    """A4 — plan-before-act body (before gather)."""
+    return (
+        "Want me to run this research plan?\n\n"
+        f"Question: {question}\n"
+        f"Angle: {plan_angle_or_subquestions}\n"
+        f"Outbound: {outbound}{destination_suffix}\n\n"
+        "I will fetch public sources and draft a cited brief. I will not send anything "
+        "unless you approve a later send ask.\n\n"
+        "Run it?"
+    )
+
+
+def plan_declined_message() -> str:
+    """A4 — No."""
+    return "Okay, not running. Send a question when you want to."
+
+
+def plan_confirmed_message() -> str:
+    """A4 — After confirm (optional)."""
+    return "On it. Gathering public sources for that question."
+
+
+def ask_title() -> str:
+    """A5 — side-effect ask title."""
+    return "Send research brief?"
 
 
 def ask_body(
@@ -94,148 +111,83 @@ def ask_body(
     newest: str,
     conflicts_n: int,
 ) -> str:
-    """Human-in-the-loop send approval interrupt body."""
+    """A5 — side-effect ask body."""
     return (
-        f"Want me to send this research brief via {channel}?\n\n"
-        f"To:      {destination}\n"
+        f"Want me to send this brief via {channel}?\n\n"
+        f"To: {destination}\n"
         f"Subject: {subject}\n\n"
         f"Preview:\n{preview_lines}\n\n"
-        f"Sources: {claim_count} claims · dated {oldest} → {newest}\n"
+        f"Sources: {claim_count} claims, dated {oldest} → {newest}\n"
         f"Conflicts flagged: {conflicts_n}\n\n"
-        "This will post/send the draft above. It will not edit the brief further.\n\n"
-        "v1 note: Approve stubs send in run state; no real Slack/email yet."
+        "I will not edit the brief further. v1: Approve stubs the send in run state; "
+        "no real Slack/email yet."
     )
 
 
-WELCOME_STARTERS = [
-    "Research: What changed in public-web tooling this quarter?",
-    "Research: Compare two vendors on pricing pages (add seed URLs if you have them).",
-    "Help: what do you do?",
-]
+def research_only_success_message() -> str:
+    """A6 — research-only success."""
+    return "Brief ready in this run. Outbound is off, so I kept it local."
 
 
-def welcome_message() -> str:
-    """Greeting for chat intent (hi / empty opener)."""
-    starters = "\n".join(f"• {s}" for s in WELCOME_STARTERS)
+def empty_message() -> str:
+    """A6 — empty."""
+    return "Not enough sourced material for a brief. Staying quiet."
+
+
+def blocked_unsourced_message() -> str:
+    """A6 — blocked unsourced."""
     return (
-        "I'm Sourced Research Desk, a research colleague for operators.\n\n"
-        "I plan public-web research, gather sources, extract dated claims, and draft "
-        "a brief you can copy or stub-send after your OK.\n\n"
-        "I will not send Slack or email without your approval on this run. "
-        "v1 outbound is stubbed: Approve records intent only.\n\n"
-        f"Try one of these:\n{starters}\n\n"
-        "Or ask what I can do."
+        "Blocked: claims are not fully sourced. Brief not cleared to send. "
+        "Fix sources or narrow the question."
     )
 
 
-def help_message() -> str:
-    """Full help / how-to reply."""
+def degrade_message(failed_list: str) -> str:
+    """A6 — partial fetch."""
     return (
-        "Here's how I work:\n\n"
-        "1. You give a research question (and optional seed URLs or fixtures offline).\n"
-        "2. I plan subquestions and queries, then fetch public http/https pages.\n"
-        "3. I extract claims with url and date. Every bullet maps to a source.\n"
-        "4. I draft a markdown brief (Findings, Conflicts, Citations).\n"
-        "5. If outbound is Slack or email, I ask before any stub send.\n\n"
-        "I do not: scrape behind login, invent citations, or auto-send in v1.\n\n"
-        "Offline tests use fixture_sources. Live fetch needs a harness inference key.\n\n"
-        "Say a question to start research, or ask about sources, outbound, or approve/deny."
+        f"Partial brief. Unreachable sources: {failed_list}. I did not invent citations "
+        "for those. Brief covers only what I could fetch."
     )
 
 
-def help_sources() -> str:
+def deny_send_message() -> str:
+    """A6 — after deny send."""
+    return "Got it. Brief stays local; nothing sent."
+
+
+def approve_send_message(message_id: str) -> str:
+    """A6 — after approve send (v1 stub)."""
     return (
-        "Every factual bullet must map to a claim with url and date.\n\n"
-        "Public http/https only. If a page fails, I say so and I do not invent content.\n"
-        "Offline runs can pass fixture_sources with claim, quote, and published_date."
+        f"Recorded stub send ({message_id}). Brief kept; no real Slack/email in v1."
     )
 
 
-def help_outbound() -> str:
+def missing_question_message() -> str:
+    """A6 — short error."""
     return (
-        "Outbound is optional: none (brief stays in run artifacts), slack, or email.\n\n"
-        "When outbound is set and the brief is sourced, I pause and ask before send.\n"
-        "Approve stubs send in run state (message_id prefix stub-). Deny keeps the brief local.\n"
-        "v1 does not post to real Slack or email."
+        "I need a research question to start. Example: Research: How are teams using "
+        "LangGraph interrupts?"
     )
 
 
-def help_approve_deny() -> str:
+def fetch_failed_message() -> str:
+    """A6 — short error."""
     return (
-        "When outbound is on and the brief is ready, I pause and ask.\n\n"
-        "• Approve: record stub send intent in this run.\n"
-        "• Deny: keep the brief; send nothing.\n\n"
-        "Neither path edits the brief further after the ask."
+        "Could not fetch any sources. Check allowlist, fixtures, or network and try again."
     )
 
 
-_TOPIC_PATTERNS: list[tuple[re.Pattern[str], Callable[[], str]]] = [
-    (
-        re.compile(r"\b(sources?|citations?|claims?|evidence|urls?)\b", re.I),
-        help_sources,
-    ),
-    (
-        re.compile(r"\b(outbound|slack|email|send|export)\b", re.I),
-        help_outbound,
-    ),
-    (
-        re.compile(r"\b(approve|deny)\b", re.I),
-        help_approve_deny,
-    ),
-]
+def outbound_label(outbound: str, destination: str) -> tuple[str, str]:
+    """Format outbound line + destination suffix for A4."""
+    ob = (outbound or "none").strip().lower()
+    if ob == "none":
+        return "none", ""
+    dest = (destination or "").strip()
+    suffix = f" → {dest}" if dest else ""
+    return ob, suffix
 
 
-def help_for_topic(human_text: str) -> str:
-    text = (human_text or "").strip()
-    if not text:
-        return help_message()
-
-    generic = re.search(
-        r"\b(what\s+do\s+you\s+do|how\s+does\s+(?:this|it)\s+work|what\s+can\s+you\s+do|"
-        r"help(?:\s+me)?|getting\s+started|capabilities)\b",
-        text,
-        re.I,
-    )
-    if generic and not re.search(
-        r"\b(sources?|citations?|outbound|approve|deny)\b", text, re.I
-    ):
-        return help_message()
-    for pattern, builder in _TOPIC_PATTERNS:
-        if pattern.search(text):
-            return builder()
-    return help_message()
-
-
-def other_message() -> str:
-    return (
-        "Didn't quite catch that. Want to start research or see a quick how-to?\n\n"
-        "Ask a research question, or say help."
-    )
-
-
-def research_plan_summary(
-    *,
-    question: str,
-    subquestions: list[str],
-    search_queries: list[str],
-    outbound: str,
-    destination: str,
-    allow_net: bool,
-) -> str:
-    """Plan-before-act summary for stage_summaries / operator visibility."""
-    fetch_line = "Live public HTTP fetch." if allow_net else "Offline fixtures (live fetch off)."
-    outbound_line = (
-        f"Outbound: {outbound} → {destination or '(not set)'} (ask before send)."
-        if outbound and outbound != "none"
-        else "Outbound: none (brief stays in run artifacts)."
-    )
-    subs = "\n".join(f"- {s}" for s in subquestions[:3]) or "- (none)"
-    queries = "\n".join(f"- {q}" for q in search_queries[:3]) or "- (none)"
-    return (
-        f"Research plan for: {question}\n\n"
-        f"Subquestions:\n{subs}\n\n"
-        f"Queries:\n{queries}\n\n"
-        f"Fetch: {fetch_line}\n"
-        f"{outbound_line}\n\n"
-        "I will not send or export without your OK on this run."
-    )
+def plan_angle_from_subquestions(subquestions: list[str]) -> str:
+    if not subquestions:
+        return "(planning angle)"
+    return "; ".join(subquestions[:3])

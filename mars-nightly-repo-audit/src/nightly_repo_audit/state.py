@@ -48,7 +48,10 @@ class OutputState(TypedDict, total=False):
 class AuditState(TypedDict, total=False):
     # MARS chat
     messages: Annotated[list[AnyMessage], add_messages]
-    intent: str  # chat | help | audit | other
+    intent: str  # chat | help | audit | audit_plan | other
+    skip_plan_confirm: bool
+    plan_confirmed: bool
+    pending_audit: dict[str, Any]
 
     # Intake
     repo: str

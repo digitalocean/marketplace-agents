@@ -28,7 +28,7 @@ def test_empty_findings_no_interrupt(monkeypatch):
     assert "__interrupt__" not in result
     assert result.get("status") == "empty"
     assert not result.get("findings")
-    assert "No cleanup worth a PR" in assistant_summary(result)
+    assert "staying quiet" in assistant_summary(result).lower()
     summaries = result.get("stage_summaries") or []
     assert any("analyze" in s for s in summaries)
     assert any("report" in s for s in summaries)

@@ -34,7 +34,7 @@ def test_intake_hi_emits_chat_aimessage(monkeypatch):
     assert result.get("messages")
     summary = assistant_summary(result)
     assert "Nightly Repo Audit" in summary
-    assert "without your approval" in summary.lower() or "without your OK" in summary.lower()
+    assert "without your ok" in summary.lower()
 
 
 def test_hi_full_graph_no_gather(monkeypatch):

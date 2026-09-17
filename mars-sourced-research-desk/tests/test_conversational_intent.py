@@ -19,7 +19,7 @@ def _offline(monkeypatch):
 def test_classify_chat_and_help():
     assert classify_intent("hi") == "chat"
     assert classify_intent("what do you do?") == "help"
-    assert classify_intent("What changed in cloud pricing?") == "research"
+    assert classify_intent("What changed in cloud pricing?") == "research_plan"
     assert is_chat_message("hey") is True
     assert is_help_message("how does this work") is True
 
@@ -31,7 +31,7 @@ def test_intake_hi_emits_chat_aimessage(monkeypatch):
     assert result.get("messages")
     summary = assistant_summary(result)
     assert "Sourced Research Desk" in summary
-    assert "without your approval" in summary.lower() or "without your OK" in summary.lower()
+    assert "without your ok" in summary.lower()
 
 
 def test_hi_full_graph_no_gather(monkeypatch):
