@@ -51,7 +51,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 Competitor Pulse has a sharp, dry GTM-researcher personality in MARS chat — helpful, not corporate. Greetings and how-to questions get a single warm reply; pulse work stays factual.
 
-The graph speaks through a single final `AIMessage` from the `report` node (plus `human_summary` for run artifacts). Intent routing runs in `intake`; plan→draft run inside `execute_pulse` so MARS stream updates never include raw `watchlist` JSON. Never raw JSON or HTML source in chat bubbles.
+The graph speaks through a single final `AIMessage` from the `report` node. `input_schema` exposes only chat-safe fields (no `watchlist`, so doctl never prefixes `{"watchlist":[]}`); `output_schema` exposes `messages` (not `human_summary`, so stream concat does not duplicate greetings). Intent routing runs in `intake`; plan→draft run inside `execute_pulse` so MARS stream updates never include raw `watchlist` JSON. Never raw JSON or HTML source in chat bubbles.
 
 | Situation | What you see |
 |-----------|----------------|

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from competitor_pulse.graph import compile_graph
+from pulse_helpers import assistant_summary, default_pulse_payload, invoke_graph
 from competitor_pulse.pulse_diff import (
     default_watchlist,
     diff_snapshots,
@@ -46,15 +47,13 @@ def test_first_run_empty_baseline_not_material_crisis(monkeypatch, tmp_path):
     empty_bl.write_text(json.dumps({"version": 1, "entries": []}), encoding="utf-8")
 
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": False,
-            "baseline_path": str(empty_bl),
-            "allow_net": False,
-        }
+    result = invoke_graph(
+        g,
+        default_pulse_payload(
+            baseline_path=str(empty_bl),
+        ),
     )
-    summary = (result.get("human_summary") or "").lower()
+    summary = assistant_summary(result).lower()
     assert result.get("first_run") is True
     assert result.get("material") is False
     assert "first look" in summary or "baseline" in summary
@@ -70,15 +69,16 @@ def test_track_fedex_chat_no_json_echo(monkeypatch, tmp_path):
     empty_bl.write_text(json.dumps({"version": 1, "entries": []}), encoding="utf-8")
 
     g = compile_graph()
-    result = g.invoke(
+    result = invoke_graph(
+        g,
         {
             "user_message": "track fedex",
             "notify": False,
             "baseline_path": str(empty_bl),
             "allow_net": False,
-        }
+        },
     )
-    summary = result.get("human_summary") or ""
+    summary = assistant_summary(result)
     assert "Fedex" in summary or "fedex" in summary.lower()
     assert '{"watchlist"' not in summary
     assert "<!DOCTYPE" not in summary
@@ -88,15 +88,11 @@ def test_track_fedex_chat_no_json_echo(monkeypatch, tmp_path):
 def test_material_diff_summaries_are_plain_language(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": False,
-            "baseline_path": str(material_baseline_path()),
-            "allow_net": False,
-        }
+    result = invoke_graph(
+        g,
+        default_pulse_payload(baseline_path=str(material_baseline_path())),
     )
-    summary = result.get("human_summary") or ""
+    summary = assistant_summary(result)
     brief = result.get("brief_md") or ""
     combined = summary + brief
     assert "<!DOCTYPE" not in combined

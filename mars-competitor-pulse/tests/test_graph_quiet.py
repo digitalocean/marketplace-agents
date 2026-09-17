@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from competitor_pulse.graph import compile_graph
+from pulse_helpers import assistant_summary, default_pulse_payload, invoke_graph, invoke_graph_full
 from competitor_pulse.pulse_diff import (
     default_baseline_path,
     default_watchlist,
@@ -22,19 +23,18 @@ def _offline(monkeypatch):
 def test_quiet_baseline_no_interrupt(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "baseline_path": str(quiet_baseline_path()),
-            "allow_net": False,
-        }
+    result = invoke_graph_full(
+        g,
+        default_pulse_payload(
+            notify=True,
+            baseline_path=str(quiet_baseline_path()),
+        ),
     )
     assert "__interrupt__" not in result
     assert result.get("status") == "empty"
     assert result.get("material") is False
     assert not result.get("deltas")
-    summary = (result.get("human_summary") or "").lower()
+    summary = assistant_summary(result).lower()
     assert "no changes" in summary or "no material" in summary
     summaries = result.get("stage_summaries") or []
     assert any("analyze" in s for s in summaries)
@@ -45,14 +45,13 @@ def test_quiet_baseline_no_interrupt(monkeypatch):
 def test_force_empty_no_interrupt(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "baseline_path": str(material_baseline_path()),
-            "force_empty": True,
-            "allow_net": False,
-        }
+    result = invoke_graph(
+        g,
+        default_pulse_payload(
+            notify=True,
+            baseline_path=str(material_baseline_path()),
+            force_empty=True,
+        ),
     )
     assert "__interrupt__" not in result
     assert result.get("status") == "empty"
@@ -63,13 +62,9 @@ def test_material_without_notify_skips_ask(monkeypatch):
     """Material deltas but notify=false → brief, no interrupt."""
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": False,
-            "baseline_path": str(material_baseline_path()),
-            "allow_net": False,
-        }
+    result = invoke_graph_full(
+        g,
+        default_pulse_payload(baseline_path=str(material_baseline_path())),
     )
     assert "__interrupt__" not in result
     assert result.get("material") is True
@@ -84,12 +79,13 @@ def test_material_gate_requires_both(monkeypatch):
     """Ask only when notify AND material — quiet+notify still no ask."""
     _offline(monkeypatch)
     g = compile_graph()
-    quiet = g.invoke(
+    quiet = invoke_graph(
+        g,
         {
             "notify": True,
             "baseline_path": str(quiet_baseline_path()),
             "allow_net": False,
-        }
+        },
     )
     assert "__interrupt__" not in quiet
     assert quiet.get("material") is False
@@ -98,7 +94,8 @@ def test_material_gate_requires_both(monkeypatch):
 
     g2 = compile_graph(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": "material-gate"}}
-    mid = g2.invoke(
+    mid = invoke_graph(
+        g2,
         {
             "notify": True,
             "baseline_path": str(default_baseline_path()),

@@ -23,6 +23,7 @@ from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 from competitor_pulse.graph import compile_graph  # noqa: E402
+from competitor_pulse.mars_text import last_assistant_text, prepare_programmatic_payload  # noqa: E402
 from competitor_pulse.llm import harness_env_available, resolve_llm_env  # noqa: E402
 from competitor_pulse.pulse_diff import (  # noqa: E402
     default_baseline_path,
@@ -65,12 +66,14 @@ def main() -> int:
     # 1) Quiet path — no interrupt
     g_quiet = compile_graph()
     quiet = g_quiet.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "baseline_path": str(quiet_bl),
-            "allow_net": False,
-        }
+        prepare_programmatic_payload(
+            {
+                "watchlist": default_watchlist(),
+                "notify": True,
+                "baseline_path": str(quiet_bl),
+                "allow_net": False,
+            }
+        )
     )
     print("\n--- quiet path ---")
     print("status:", quiet.get("status"))
@@ -83,13 +86,15 @@ def main() -> int:
     g = compile_graph(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": "smoke-pulse"}}
     mid = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "channel": "slack",
-            "baseline_path": str(material_bl),
-            "allow_net": False,
-        },
+        prepare_programmatic_payload(
+            {
+                "watchlist": default_watchlist(),
+                "notify": True,
+                "channel": "slack",
+                "baseline_path": str(material_bl),
+                "allow_net": False,
+            }
+        ),
         cfg,
     )
     print("\n--- ask interrupt ---")
@@ -116,8 +121,8 @@ def main() -> int:
     print("skipped:", final.get("skipped"))
     print("notified:", final.get("notified"))
     print("delta_count:", final.get("delta_count"))
-    print("\n--- human_summary ---")
-    print(final.get("human_summary"))
+    print("\n--- assistant text ---")
+    print(last_assistant_text(final))
 
     if final.get("status") != "denied" or final.get("notified"):
         print("SMOKE FAIL: deny should yield denied + no notify", file=sys.stderr)
