@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -10,6 +11,19 @@ from pathlib import Path
 from typing import Any
 
 _MODULE_KEYS = ("site", "pricing", "changelog", "careers")
+
+_DOCTYPE_RE = re.compile(r"<!DOCTYPE[^>]*>", re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+_ERROR_MARKERS = (
+    "system downtime",
+    "service unavailable",
+    "503 service",
+    "404 not found",
+    "access denied",
+    "maintenance",
+    "temporarily unavailable",
+)
 
 
 def package_root() -> Path:
@@ -98,18 +112,108 @@ def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def summarize_change(module: str, old_excerpt: str, new_text: str) -> str:
-    """Short human delta summary (deterministic, no LLM)."""
-    new_ex = new_text.strip()[:200]
-    if module == "pricing":
-        return f"Pricing page changed (was ~{len(old_excerpt)} chars → {len(new_text)})."
+def strip_html(text: str) -> str:
+    """Remove tags/DOCTYPE and collapse whitespace for operator-facing copy."""
+    if not text:
+        return ""
+    cleaned = _DOCTYPE_RE.sub(" ", text)
+    cleaned = _TAG_RE.sub(" ", cleaned)
+    cleaned = html.unescape(cleaned)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned
+
+
+def extract_title(text: str) -> str:
+    """Best-effort page title from HTML."""
+    m = re.search(r"<title[^>]*>([^<]+)</title>", text or "", re.I)
+    if m:
+        return strip_html(m.group(1))[:120]
+    return ""
+
+
+def detect_page_issue(text: str) -> str | None:
+    """Return a short issue label when the page looks like an error/downtime page."""
+    plain = strip_html(text).lower()
+    if not plain:
+        return "empty or unreachable page"
+    for marker in _ERROR_MARKERS:
+        if marker in plain:
+            return marker
+    if "<!doctype" in (text or "").lower() and len(plain) < 80:
+        return "minimal HTML response (possible error page)"
+    return None
+
+
+def describe_snapshot(module: str, text: str) -> str:
+    """Human first-look summary for a captured page."""
+    issue = detect_page_issue(text)
+    if issue:
+        title = extract_title(text)
+        if title:
+            return f"{module}: looks like an error/downtime page — “{title}” ({issue})."
+        return f"{module}: looks like an error/downtime page ({issue})."
+
     if module == "changelog":
-        first = new_text.strip().splitlines()[0] if new_text.strip() else "changelog update"
+        first = strip_html(text).splitlines()[0] if text.strip() else "changelog"
+        return f"changelog: latest entry starts with “{first[:100]}”."
+
+    plain = strip_html(text)
+    title = extract_title(text)
+    if module == "pricing":
+        if title:
+            return f"pricing page titled “{title}”."
+        return "pricing page captured."
+    if module == "careers":
+        if title:
+            return f"careers page titled “{title}”."
+        return "careers page captured."
+    # site
+    if title:
+        snippet = plain.replace(title, "", 1).strip()[:80]
+        if snippet:
+            return f"homepage “{title}” — {snippet}…"
+        return f"homepage titled “{title}”."
+    return f"homepage captured ({len(plain)} chars of visible text)."
+
+
+def summarize_change(
+    module: str,
+    old_excerpt: str,
+    new_text: str,
+    *,
+    is_baseline_capture: bool = False,
+) -> str:
+    """Short human delta summary (deterministic, no LLM)."""
+    if is_baseline_capture:
+        return describe_snapshot(module, new_text)
+
+    plain_new = strip_html(new_text)
+    issue = detect_page_issue(new_text)
+    if issue:
+        title = extract_title(new_text)
+        if title:
+            return f"Page now shows error/downtime content — “{title}”."
+        return f"Page now looks like an error/downtime response ({issue})."
+
+    if module == "pricing":
+        title = extract_title(new_text)
+        if title:
+            return f"Pricing page updated — “{title}”."
+        return "Pricing page content changed."
+    if module == "changelog":
+        first = plain_new.splitlines()[0] if plain_new else "changelog update"
         return f"Changelog update: {first[:120]}"
     if module == "careers":
+        title = extract_title(new_text)
+        if title:
+            return f"Careers page updated — “{title}”."
         return "Careers page content changed."
     # site
-    return f"Site copy changed: {new_ex[:100]}…"
+    title = extract_title(new_text)
+    if title:
+        return f"Homepage updated — “{title}”."
+    snippet = plain_new[:100]
+    return f"Homepage copy changed: {snippet}…" if snippet else "Homepage copy changed."
 
 
 def change_type(module: str) -> str:
@@ -119,6 +223,24 @@ def change_type(module: str) -> str:
         "careers": "careers_change",
         "site": "site_copy_change",
     }.get(module, "content_change")
+
+
+def counterposition_line(delta: dict[str, Any]) -> str:
+    """One useful counterposition line — no internal change_type boilerplate."""
+    comp = delta.get("competitor") or "Competitor"
+    module = delta.get("module") or "page"
+    summary = delta.get("summary") or ""
+    if delta.get("is_baseline_capture"):
+        return ""
+    if module == "pricing":
+        return f"{comp} moved pricing — sanity-check our tier story and any deal desk talk tracks."
+    if module == "changelog":
+        return f"{comp} shipped something new — decide if we need a competitive response in GTM."
+    if module == "careers":
+        return f"{comp} hiring signal on careers — worth a quick check for team focus areas."
+    if "error" in summary.lower() or "downtime" in summary.lower():
+        return f"{comp} site may be unstable — hold outbound until their page is back."
+    return f"{comp} homepage shift — skim for positioning changes before the next customer call."
 
 
 def diff_snapshots(
@@ -139,18 +261,32 @@ def diff_snapshots(
             continue
         old_excerpt = (base or {}).get("text_excerpt") or ""
         new_text = snap.get("text") or ""
+        is_baseline_capture = base is None
         deltas.append(
             {
                 "competitor": comp,
                 "module": module,
                 "change_type": change_type(module),
-                "summary": summarize_change(module, old_excerpt, new_text),
+                "summary": summarize_change(
+                    module,
+                    old_excerpt,
+                    new_text,
+                    is_baseline_capture=is_baseline_capture,
+                ),
                 "evidence_url": snap.get("url") or (base or {}).get("url") or "",
                 "old_hash": (base or {}).get("content_hash") or "",
                 "new_hash": new_hash,
+                "is_baseline_capture": is_baseline_capture,
             }
         )
     return deltas
+
+
+def split_deltas(deltas: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate first-baseline captures from real material changes."""
+    captures = [d for d in deltas if d.get("is_baseline_capture")]
+    changes = [d for d in deltas if not d.get("is_baseline_capture")]
+    return captures, changes
 
 
 def allow_network() -> bool:
@@ -166,7 +302,6 @@ def modules_from_watchlist(watchlist: list[dict[str, Any]]) -> list[str]:
         for m in _MODULE_KEYS:
             if urls.get(m) and m not in found:
                 found.append(m)
-        # public_search is optional plan module when no URLs — skip in v1 fixtures
     if not found:
         found = ["site"]
     return found

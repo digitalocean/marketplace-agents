@@ -13,6 +13,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 | `Track OpenAI, Anthropic, and Google for SpaceXAI` | Resolves OpenAI, Anthropic, and Google AI with public marketing URLs |
 | `Pulse on Cursor and Perplexity` | Tracks Cursor and Perplexity |
 | `Track Cursor and alert on Slack` | Tracks Cursor; sets `notify=true` for the approval gate |
+| `track fedex` | Sets up a watch on FedEx with best-effort public URLs (LLM when inference is configured) |
 | `hi` or `run` | Uses the Acme/BetaCo fixture watchlist (smoke / backward-compat) |
 
 **How intake works**
@@ -23,6 +24,7 @@ Start a chat and name the companies you want to track in plain English — no JS
    - With **harness inference** configured (`HARNESS_INFERENCE_API_KEY` or `OPENAI_API_KEY`), an LLM pass can extract less common company names and best-effort URLs.
    - An **explicit tracking request** that names no resolvable companies (e.g. `Track FooBar and BazQuux`) returns **blocked** with a prompt to name specific competitors — it does **not** silently fall back to Acme fixtures.
    - **Generic or empty** messages (`hi`, `run`, no companies) still use the fixture watchlist for smoke and tests.
+   - **Raw JSON** payloads are parsed silently — they never appear as assistant chat text.
 
 **Defaults from chat**
 
@@ -36,18 +38,34 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 ## What it does
 
-- Loads a competitor watchlist (name + public URLs per module) from chat, state, or fixtures
+- Loads a competitor watchlist from chat, state, or fixtures
 - Gathers site / pricing / changelog / careers snapshots (fixtures offline; optional public HTTP when `ALLOW_NET=1`)
-- Diffs against workspace/fixture baseline JSON and marks `material`
-- Drafts a counterposition brief + notify draft
+- Diffs against workspace/fixture baseline JSON
+- **First run** (no prior baseline for those pages): establishes baseline and summarizes what the pages look like in plain English — not “material changes”
+- **Later runs**: short PM-readable bullets with evidence URLs when content actually moved
 - Stops for human approval before notify when notify is requested and changes are material
+
+## Chat tone (operator-facing)
+
+The graph speaks through `human_summary` and a final `AIMessage` — never raw JSON or HTML source.
+
+| Situation | What you see |
+|-----------|----------------|
+| `track fedex` (first time) | Short ack + **First look — baseline established** with human page summaries |
+| Quiet re-run | **No changes** since last pulse |
+| Material diff | What moved + optional counterposition one-liners |
+| Notify | Off by default; set `notify: true` to gate an approval ask |
+
+**Before (bad):** `{"watchlist":[{"name":"FedEx",...}]}` or delta bullets with `<!DOCTYPE HTML…`
+
+**After (good):** “Got it — setting up a watch on **FedEx**. … First look — baseline established. … homepage looks like an error/downtime page — ‘FedEx \| System Downtime’.”
 
 ## What it does not (v1)
 
 - Auto-notify or send real Slack/email (act stubs `notify_id` only)
 - Competitor logins, signup identity, or scrape behind login
 - Churn winback / marketplace / desktop-bot branding
-- Presenting Approve when the diff is empty or notify is disabled
+- Presenting Approve when the diff is empty, on first baseline capture, or notify is disabled
 
 ## Run flow
 
@@ -55,7 +73,9 @@ Start a chat and name the companies you want to track in plain English — no JS
 intake → plan → gather → analyze → draft → **ask** → act → report
 ```
 
-**Ask is skipped** when the diff is empty / non-material (`status: empty`), when `notify` is false, or when intake is blocked.
+**Ask is skipped** on first-baseline capture, when the diff is empty / non-material (`status: empty`), when `notify` is false (default), or when intake is blocked.
+
+Intermediate stages update `stage_summaries` only — the operator sees intake ack (optional) plus the final `report` message.
 
 ## Human approval
 
@@ -119,7 +139,7 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 - v1 offline path uses `fixtures/watchlist.json`, `fixtures/snapshots/`, and `fixtures/baselines/*.json`
 - Public HTTP fetch only when `ALLOW_NET=1`; tests/smoke set `ALLOW_NET=0`
-- `notify` is stubbed — records intent in state only; no Action Gateway / Slack required for local proof
+- `notify` defaults **off** — records intent in state only; no Action Gateway / Slack required for local proof
 
 ## Smoke
 
@@ -137,9 +157,16 @@ Pulse on Cursor and Perplexity
 Track Cursor and alert on Slack
 ```
 
-Expect: intake resolves companies from the message, `allow_net=true` for NL, stages through `draft`, and an **ask** interrupt when `notify` is on and `material == true`.
+**First-look path (no ask)** — empty baseline + chat or `user_message`:
 
-**Fixture path (no chat)** — empty or generic input uses Acme/BetaCo fixtures; local script:
+```json
+{
+  "user_message": "track fedex",
+  "allow_net": false
+}
+```
+
+**Fixture path (no chat)** — empty or generic input uses Acme/BetaCo fixtures:
 
 ```bash
 ALLOW_NET=0 python scripts/smoke_invoke.py
@@ -149,7 +176,7 @@ ALLOW_NET=0 python scripts/smoke_invoke.py
 
 ```json
 {
-  "notify": true,
+  "notify": false,
   "baseline_path": "fixtures/baselines/quiet.json",
   "allow_net": false
 }
@@ -169,7 +196,7 @@ ALLOW_NET=0 python scripts/smoke_invoke.py
 Expect across paths:
 
 1. Stages through `draft` without side effects.
-2. An **ask** interrupt when notify is on and `material == true`; or a clean `empty` report with no ask.
+2. An **ask** interrupt when notify is on and `material == true`; or a clean `empty` / `baseline` report with no ask.
 3. After Approve: stub notify evidence (`status: notified`, `notify_id` stub).
 4. After Deny: `status: denied` and no notify.
 

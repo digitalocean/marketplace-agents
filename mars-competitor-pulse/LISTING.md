@@ -2,7 +2,9 @@
 
 **For** product and GTM operators who watch a named competitor list and want a material-change brief — not a noisy bot that pings every crawl.
 
-**Job-to-be-done:** Load watchlist → fetch public modules (site / pricing / changelog / careers) → diff baselines → draft counterposition brief → **ask before notify** when changes are material.
+**Job-to-be-done:** Say `track FedEx` (or load a watchlist) → fetch public modules → diff baselines → operator-grade chat brief → **ask before notify** only when you opt in and changes are material.
+
+**Chat tone:** Plain English, never raw JSON or HTML. First run establishes a baseline (“first look”); later runs surface PM-readable deltas with evidence URLs.
 
 **Why MARS / LangGraph:** Same MARS-shaped LangGraph family as Research Desk and Nightly Audit: structured stages, one approval gate before outbound, draft-by-default. Public HTTP only — never competitor logins.
 
@@ -13,7 +15,8 @@
 - Flow: `intake → plan → gather → analyze → draft → ask → act → report`
 - Watchlist of competitors with public URLs per module
 - Baseline diff with `material` flag; counterposition brief + notify draft
-- HITL gate **Notify about competitor changes?** only when `notify` is on **and** `material == true`
+- HITL gate **Notify about competitor changes?** only when `notify` is on **and** `material == true` (notify defaults **off**)
+- First baseline capture → “first look” summary, **no ask**, not fake “material crisis”
 - Quiet when clean: empty / non-material diff → `status: empty`, **no ask**
 - Offline fixture path (`ALLOW_NET=0`) for tests and smoke — no API key
 - Optional live public HTTP when `ALLOW_NET=1`; harness LLM env optional for live planning
