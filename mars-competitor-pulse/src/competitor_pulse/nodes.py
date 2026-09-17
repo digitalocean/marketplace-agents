@@ -12,6 +12,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 from competitor_pulse.chat import (
+    ASSISTANT_DISPLAY_NAME,
     format_watch_ack,
     looks_like_watchlist_json,
     parse_track_message,
@@ -65,7 +66,65 @@ def _assistant_reply(summary: str, brief_md: str | None = None) -> dict[str, Any
     content = summary
     if brief_md:
         content = f"{summary}\n\n---\n\n{brief_md}"
-    return {"messages": [AIMessage(content=content)]}
+    return {
+        "messages": [
+            AIMessage(content=content, name=ASSISTANT_DISPLAY_NAME),
+        ]
+    }
+
+
+def _watch_names_from(watchlist: list[dict[str, Any]] | None) -> list[str]:
+    return [
+        (item.get("name") or "").strip() or "?"
+        for item in (watchlist or [])
+        if (item.get("name") or "").strip()
+    ]
+
+
+def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
+    """Expose pulse results to MARS without raw watchlist JSON in stream updates."""
+    watchlist = list(state.get("watchlist") or [])
+    out: dict[str, Any] = {
+        "watch_names": _watch_names_from(watchlist),
+    }
+    passthrough = (
+        "chat_ack",
+        "notify",
+        "channel",
+        "fixture_dir",
+        "baseline_path",
+        "snapshot_dir",
+        "allow_net",
+        "status",
+        "modules",
+        "run_id",
+        "snapshots",
+        "deltas",
+        "baseline_captures",
+        "material",
+        "first_run",
+        "brief_md",
+        "counterpositions",
+        "delta_count",
+        "notify_draft",
+        "skipped",
+        "notified",
+        "stage_summaries",
+        "blocked_reason",
+    )
+    for key in passthrough:
+        if key in state:
+            out[key] = state[key]
+    return out
+
+
+def _mars_safe_intake_update(full: dict[str, Any]) -> dict[str, Any]:
+    """Strip watchlist from intake stream updates; keep watch_names for labels."""
+    watchlist = list(full.get("watchlist") or [])
+    out = {key: value for key, value in full.items() if key != "watchlist"}
+    if watchlist or full.get("intent") == "pulse":
+        out["watch_names"] = _watch_names_from(watchlist)
+    return out
 
 
 def _human_message_text(messages: list[Any] | None) -> str:
@@ -229,7 +288,7 @@ def intake(state: PulseState) -> dict[str, Any]:
             "status": "blocked",
             "watchlist": list(state.get("watchlist") or []),
             "notify": bool(state.get("notify")),
-            "human_summary": "Blocked: fetch/tools unavailable.",
+            "blocked_reason": "Blocked: fetch/tools unavailable.",
             "stage_summaries": _append_summary(
                 state, "intake: blocked — fetch/tools unavailable"
             ),
@@ -266,7 +325,6 @@ def intake(state: PulseState) -> dict[str, Any]:
             "status": intent,
             "watchlist": [],
             "notify": False,
-            "human_summary": "",
             "stage_summaries": _append_summary(
                 state, f"intake: {intent} — conversational"
             ),
@@ -288,7 +346,7 @@ def intake(state: PulseState) -> dict[str, Any]:
             "status": "blocked",
             "watchlist": [],
             "notify": False,
-            "human_summary": blocked_summary,
+            "blocked_reason": blocked_summary,
             "stage_summaries": _append_summary(
                 state, f"intake: blocked — {blocked_summary}"
             ),
@@ -346,7 +404,6 @@ def intake(state: PulseState) -> dict[str, Any]:
         "allow_net": allow_net,
         "status": "ok",
         "chat_ack": chat_ack,
-        "human_summary": chat_ack,
         "first_run": False,
         "stage_summaries": _append_summary(state, "intake: watchlist ready"),
         "skipped": False,
@@ -354,6 +411,23 @@ def intake(state: PulseState) -> dict[str, Any]:
         "deltas": [],
         "material": False,
     }
+
+
+def intake_node(state: PulseState) -> dict[str, Any]:
+    """Graph intake: classify/route without streaming raw watchlist JSON."""
+    return _mars_safe_intake_update(intake(state))
+
+
+def execute_pulse(state: PulseState) -> dict[str, Any]:
+    """Run plan→draft as one streamed node; restore watchlist internally."""
+    current: dict[str, Any] = dict(state)
+    if current.get("intent") == "pulse" and not current.get("watchlist"):
+        current.update(intake(state))
+    for stage in (plan, gather, analyze, draft):
+        update = stage(current)  # type: ignore[arg-type]
+        if update:
+            current.update(update)
+    return _mars_safe_pulse_update(current)
 
 
 # ---------------------------------------------------------------------------
@@ -677,13 +751,13 @@ def draft(state: PulseState) -> dict[str, Any]:
 
 
 def route_after_intake(state: PulseState) -> str:
-    """Conversational intents skip gather; pulse continues to plan."""
+    """Conversational intents skip gather; pulse continues to execute_pulse."""
     intent = (state.get("intent") or "pulse").strip().lower()
     if intent in {"chat", "help", "other"}:
         return "converse"
     if state.get("status") == "blocked":
         return "report"
-    return "plan"
+    return "execute_pulse"
 
 
 def converse(state: PulseState) -> dict[str, Any]:
@@ -821,8 +895,10 @@ def _format_first_run_report(state: PulseState) -> str:
 
 
 def _format_quiet_report(state: PulseState) -> str:
-    watchlist = list(state.get("watchlist") or [])
-    names = [w.get("name") or "?" for w in watchlist]
+    names = list(state.get("watch_names") or [])
+    if not names:
+        watchlist = list(state.get("watchlist") or [])
+        names = [w.get("name") or "?" for w in watchlist]
     modules = state.get("modules") or []
     return (
         f"**No changes** since the last pulse for {', '.join(names) or 'your watchlist'}.\n\n"
@@ -867,10 +943,14 @@ def report(state: PulseState) -> dict[str, Any]:
         next_hint = "Name companies to track or ask how this works."
         out_status = status
     elif status == "blocked":
-        summary = state.get("human_summary") or (
-            "Could not complete the pulse — fetch/tools were unavailable.\n"
-            f"Watchlist had {watch_n} competitor(s). Fix network/fixtures and retry."
-        )
+        blocked_reason = (state.get("blocked_reason") or "").strip()
+        if blocked_reason:
+            summary = blocked_reason
+        else:
+            summary = (
+                "Could not complete the pulse — fetch/tools were unavailable.\n"
+                f"Watchlist had {watch_n} competitor(s). Fix network/fixtures and retry."
+            )
         next_hint = "Fix fixtures / network and retry."
         out_status = "blocked"
     elif first_run or status == "baseline":

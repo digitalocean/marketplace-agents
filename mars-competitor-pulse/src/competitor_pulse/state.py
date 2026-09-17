@@ -24,6 +24,8 @@ class PulseState(TypedDict, total=False):
 
     # Intake
     watchlist: list[dict[str, Any]]
+    watch_names: list[str]  # MARS-safe names (no raw watchlist JSON in stream)
+    blocked_reason: str
     notify: bool
     channel: str
     fixture_dir: str

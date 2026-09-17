@@ -96,7 +96,7 @@ def test_intake_unresolved_track_request_blocked(monkeypatch):
     )
     assert result["status"] == "blocked"
     assert result["watchlist"] == []
-    assert "resolve" in (result.get("human_summary") or "").lower()
+    assert "resolve" in (result.get("blocked_reason") or "").lower()
     names = {item["name"] for item in default_watchlist()}
     assert "Acme" not in names or "Acme" not in {
         item["name"] for item in result["watchlist"]

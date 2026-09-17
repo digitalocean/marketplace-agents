@@ -4,6 +4,9 @@
     "langchain_openai"
   ],
   "graphs": {
-    "agent": "./src/competitor_pulse/graph.py:graph"
+    "agent": {
+      "path": "./src/competitor_pulse/graph.py:graph",
+      "description": "Competitor Pulse — watchlist diff, baseline brief, ask before notify"
+    }
   }
 }

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+ASSISTANT_DISPLAY_NAME = "Competitor Pulse"
+
 _MODULE_LABELS = {
     "site": "homepage",
     "pricing": "pricing",
@@ -89,3 +91,13 @@ def looks_like_watchlist_json(text: str) -> bool:
         return False
     t = text.strip()
     return t.startswith('{"watchlist"') or t.startswith('{"watchlist":')
+
+
+_WATCHLIST_JSON_RE = re.compile(r'\{\s*"watchlist"\s*:', re.IGNORECASE)
+
+
+def contains_watchlist_json(text: str) -> bool:
+    """True when text includes raw watchlist JSON (for chat bubble guards)."""
+    if not text:
+        return False
+    return bool(_WATCHLIST_JSON_RE.search(text))
