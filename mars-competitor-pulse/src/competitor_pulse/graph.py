@@ -9,8 +9,11 @@ from langgraph.graph import END, START, StateGraph
 from competitor_pulse.nodes import (
     act,
     ask,
+    converse,
     execute_pulse,
+    intake_node,
     report,
+    route_after_intake,
     should_ask,
 )
 from competitor_pulse.state import PulseState
@@ -19,16 +22,25 @@ from competitor_pulse.state import PulseState
 def build_graph() -> StateGraph:
     """Construct the uncompiled StateGraph.
 
-    intake→draft run inside ``execute_pulse`` so MARS stream updates never
-    include raw ``watchlist`` JSON. Only ``report`` appends chat messages.
+    ``intake_node`` classifies intent and routes; ``execute_pulse`` runs
+    plan→draft without streaming raw ``watchlist`` JSON. Only ``report``
+    appends chat ``messages``.
     """
     builder: StateGraph = StateGraph(PulseState)
+    builder.add_node("intake", intake_node)
+    builder.add_node("converse", converse)
     builder.add_node("execute_pulse", execute_pulse)
     builder.add_node("ask", ask)
     builder.add_node("act", act)
     builder.add_node("report", report)
 
-    builder.add_edge(START, "execute_pulse")
+    builder.add_edge(START, "intake")
+    builder.add_conditional_edges(
+        "intake",
+        route_after_intake,
+        {"converse": "converse", "execute_pulse": "execute_pulse", "report": "report"},
+    )
+    builder.add_edge("converse", "report")
     builder.add_conditional_edges(
         "execute_pulse",
         should_ask,

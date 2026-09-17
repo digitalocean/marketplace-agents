@@ -71,13 +71,12 @@ def test_intake_json_still_works(monkeypatch):
     assert result["allow_net"] is False
 
 
-def test_intake_generic_message_uses_acme_default(monkeypatch):
+def test_intake_generic_message_routes_to_chat(monkeypatch):
     _offline(monkeypatch)
     result = intake({"messages": [HumanMessage(content="hi")]})
-    assert result["watchlist"] == default_watchlist()
-    assert result["status"] == "ok"
-    names = {item["name"] for item in result["watchlist"]}
-    assert "Acme" in names
+    assert result.get("intent") == "chat"
+    assert result["watchlist"] == []
+    assert result["status"] == "chat"
 
 
 def test_intake_no_message_uses_acme_default(monkeypatch):

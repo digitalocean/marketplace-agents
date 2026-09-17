@@ -1,0 +1,114 @@
+"""Conversational intent routing: chat, help, no Acme fixture fallback."""
+
+from __future__ import annotations
+
+import json
+
+from langchain_core.messages import HumanMessage
+
+from competitor_pulse.graph import compile_graph
+from competitor_pulse.intent import classify_intent, is_chat_message, is_help_message
+from competitor_pulse.nodes import intake
+from competitor_pulse.pulse_diff import default_watchlist
+
+
+def _offline(monkeypatch):
+    monkeypatch.delenv("HARNESS_INFERENCE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOW_NET", "0")
+
+
+def test_classify_chat_and_help():
+    assert classify_intent("hi") == "chat"
+    assert classify_intent("run") == "chat"
+    assert classify_intent("thanks!") == "chat"
+    assert classify_intent("what do you do?") == "help"
+    assert classify_intent("how does this work") == "help"
+    assert classify_intent("track fedex") == "pulse"
+    assert classify_intent("") == "pulse"
+    assert is_chat_message("hey there") is False  # not exact generic
+    assert is_help_message("tell me about baselines") is True
+
+
+def test_intake_hi_is_chat_not_acme(monkeypatch):
+    _offline(monkeypatch)
+    result = intake({"messages": [HumanMessage(content="hi")]})
+    assert result.get("intent") == "chat"
+    assert result.get("watchlist") == []
+    assert result.get("status") == "chat"
+    names = {item["name"] for item in default_watchlist()}
+    assert "Acme" not in names or not result.get("watchlist")
+
+
+def test_intake_no_message_still_fixture_watchlist(monkeypatch):
+    """Programmatic invoke without chat text keeps fixture path."""
+    _offline(monkeypatch)
+    result = intake({})
+    assert result.get("intent") == "pulse"
+    assert result["watchlist"] == default_watchlist()
+
+
+def test_hi_greeting_full_graph(monkeypatch):
+    _offline(monkeypatch)
+    g = compile_graph()
+    result = g.invoke({"messages": [HumanMessage(content="hi")]})
+    summary = result.get("human_summary") or ""
+    assert result.get("status") == "chat"
+    assert result.get("material") is False
+    assert not result.get("deltas")
+    assert "Acme" not in summary
+    assert "Competitor Pulse" in summary
+    assert "track" in summary.lower()
+    summaries = " ".join(result.get("stage_summaries") or [])
+    assert "gather:" not in summaries
+    assert "analyze:" not in summaries
+
+
+def test_help_question_full_graph(monkeypatch):
+    _offline(monkeypatch)
+    g = compile_graph()
+    result = g.invoke(
+        {"messages": [HumanMessage(content="what do you do?")]}
+    )
+    summary = result.get("human_summary") or ""
+    assert result.get("status") == "help"
+    assert result.get("material") is False
+    assert "baseline" in summary.lower() or "public" in summary.lower()
+    assert "Acme" not in summary
+    assert '{"watchlist"' not in summary
+
+
+def test_run_alone_not_acme_fixture(monkeypatch):
+    _offline(monkeypatch)
+    g = compile_graph()
+    result = g.invoke({"messages": [HumanMessage(content="run")]})
+    assert result.get("status") == "chat"
+    watchlist = result.get("watchlist") or []
+    assert not any(item.get("name") == "Acme" for item in watchlist)
+    summaries = " ".join(result.get("stage_summaries") or [])
+    assert "gather:" not in summaries
+
+
+def test_track_fedex_still_baseline_pulse(monkeypatch, tmp_path):
+    """Track intent keeps first-run baseline UX — not conversational."""
+    _offline(monkeypatch)
+    empty_bl = tmp_path / "empty.json"
+    empty_bl.write_text(json.dumps({"version": 1, "entries": []}), encoding="utf-8")
+
+    g = compile_graph()
+    result = g.invoke(
+        {
+            "user_message": "track fedex",
+            "notify": False,
+            "baseline_path": str(empty_bl),
+            "allow_net": False,
+        }
+    )
+    summary = (result.get("human_summary") or "").lower()
+    assert result.get("status") not in {"chat", "help", "other"}
+    assert "fedex" in summary
+    assert "acme" not in summary
+    summaries = " ".join(result.get("stage_summaries") or [])
+    assert "gather:" in summaries
+    assert "analyze:" in summaries
+    assert "converse:" not in summaries

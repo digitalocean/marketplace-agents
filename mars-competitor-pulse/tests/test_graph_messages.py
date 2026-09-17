@@ -133,7 +133,7 @@ def test_no_assistant_message_contains_watchlist_json(monkeypatch):
 
 
 def test_stream_updates_never_include_watchlist(monkeypatch):
-    """MARS streams node updates — execute_pulse must not emit watchlist JSON."""
+    """MARS streams node updates — no node may emit watchlist JSON."""
     _offline(monkeypatch)
     g = compile_graph()
     for chunk in g.stream(
@@ -149,6 +149,24 @@ def test_stream_updates_never_include_watchlist(monkeypatch):
                             msg.content
                         )
                         assert not contains_watchlist_json(content)
+
+
+def test_hi_stream_has_no_watchlist_or_duplicate_messages(monkeypatch):
+    """Greeting path streams conversational update only — one final AIMessage."""
+    _offline(monkeypatch)
+    g = compile_graph()
+    ai_count = 0
+    for chunk in g.stream(
+        {"messages": [HumanMessage(content="hi")], "allow_net": False},
+        stream_mode="updates",
+    ):
+        for _node, update in chunk.items():
+            assert "watchlist" not in (update or {})
+            if update and update.get("messages"):
+                ai_count += sum(
+                    1 for msg in update["messages"] if isinstance(msg, AIMessage)
+                )
+    assert ai_count == 1
 
 
 def test_graph_compile_name(monkeypatch):

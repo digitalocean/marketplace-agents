@@ -17,6 +17,8 @@ from competitor_pulse.chat import (
     looks_like_watchlist_json,
     parse_track_message,
 )
+from competitor_pulse.converse import conversational_reply
+from competitor_pulse.intent import classify_intent
 from competitor_pulse.intake_parse import parse_notify_from_message, parse_watchlist_from_message
 from competitor_pulse.pulse_diff import (
     allow_network,
@@ -113,6 +115,15 @@ def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
     for key in passthrough:
         if key in state:
             out[key] = state[key]
+    return out
+
+
+def _mars_safe_intake_update(full: dict[str, Any]) -> dict[str, Any]:
+    """Strip watchlist from intake stream updates; keep watch_names for labels."""
+    watchlist = list(full.get("watchlist") or [])
+    out = {key: value for key, value in full.items() if key != "watchlist"}
+    if watchlist or full.get("intent") == "pulse":
+        out["watch_names"] = _watch_names_from(watchlist)
     return out
 
 
@@ -241,7 +252,7 @@ def _resolve_watchlist(
             ),
         }
 
-    if parsed.get("is_generic") or not human_text.strip():
+    if not human_text.strip():
         return {
             "watchlist": default_watchlist(),
             "from_nl": False,
@@ -249,7 +260,7 @@ def _resolve_watchlist(
         }
 
     return {
-        "watchlist": default_watchlist(),
+        "watchlist": [],
         "from_nl": False,
         "blocked": False,
     }
@@ -294,6 +305,34 @@ def intake(state: PulseState) -> dict[str, Any]:
     intake_json = _parse_intake_json(human_text) if human_text else None
     overlay = _apply_intake_overlay(state, intake_json or {})
     nl_text = "" if looks_like_watchlist_json(human_text) else human_text
+
+    parsed_nl = parse_watchlist_from_message(nl_text) if nl_text else {}
+    intent = classify_intent(
+        nl_text,
+        state_watchlist=list(state.get("watchlist") or []),
+        overlay_watchlist=(
+            overlay.get("watchlist")
+            if isinstance(overlay.get("watchlist"), list)
+            else None
+        ),
+        overlay_preset=overlay.get("preset"),
+        parsed_nl=parsed_nl,
+    )
+
+    if intent in {"chat", "help", "other"}:
+        return {
+            "intent": intent,
+            "status": intent,
+            "watchlist": [],
+            "notify": False,
+            "stage_summaries": _append_summary(
+                state, f"intake: {intent} — conversational"
+            ),
+            "deltas": [],
+            "material": False,
+            "skipped": False,
+            "notified": False,
+        }
 
     resolved = _resolve_watchlist(state, overlay, nl_text)
     watchlist = list(resolved.get("watchlist") or [])
@@ -355,6 +394,7 @@ def intake(state: PulseState) -> dict[str, Any]:
         watchlist, allow_net=allow_net, from_chat=from_chat
     )
     return {
+        "intent": "pulse",
         "watchlist": watchlist,
         "notify": notify,
         "channel": channel,
@@ -373,10 +413,17 @@ def intake(state: PulseState) -> dict[str, Any]:
     }
 
 
+def intake_node(state: PulseState) -> dict[str, Any]:
+    """Graph intake: classify/route without streaming raw watchlist JSON."""
+    return _mars_safe_intake_update(intake(state))
+
+
 def execute_pulse(state: PulseState) -> dict[str, Any]:
-    """Run intake→draft as one streamed node so watchlist never surfaces in MARS chat."""
+    """Run plan→draft as one streamed node; restore watchlist internally."""
     current: dict[str, Any] = dict(state)
-    for stage in (intake, plan, gather, analyze, draft):
+    if current.get("intent") == "pulse" and not current.get("watchlist"):
+        current.update(intake(state))
+    for stage in (plan, gather, analyze, draft):
         update = stage(current)  # type: ignore[arg-type]
         if update:
             current.update(update)
@@ -703,6 +750,33 @@ def draft(state: PulseState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def route_after_intake(state: PulseState) -> str:
+    """Conversational intents skip gather; pulse continues to execute_pulse."""
+    intent = (state.get("intent") or "pulse").strip().lower()
+    if intent in {"chat", "help", "other"}:
+        return "converse"
+    if state.get("status") == "blocked":
+        return "report"
+    return "execute_pulse"
+
+
+def converse(state: PulseState) -> dict[str, Any]:
+    """Single warm reply for chat / help / ambiguous — no fetch or deltas."""
+    intent = (state.get("intent") or "chat").strip().lower()
+    human_text = _human_message_text(state.get("messages"))
+    if not human_text.strip():
+        human_text = (state.get("user_message") or "").strip()
+    reply = conversational_reply(intent, human_text)
+    return {
+        "human_summary": reply,
+        "status": intent,
+        "material": False,
+        "deltas": [],
+        "delta_count": 0,
+        "stage_summaries": _append_summary(state, f"converse: {intent}"),
+    }
+
+
 def should_ask(state: PulseState) -> str:
     """Ask only if notify requested AND material == true."""
     if state.get("status") in {"blocked", "empty", "error", "baseline"}:
@@ -864,7 +938,11 @@ def report(state: PulseState) -> dict[str, Any]:
     material = bool(state.get("material"))
     watch_n = len(state.get("watchlist") or [])
 
-    if status == "blocked":
+    if status in {"chat", "help", "other"}:
+        summary = state.get("human_summary") or ""
+        next_hint = "Name companies to track or ask how this works."
+        out_status = status
+    elif status == "blocked":
         blocked_reason = (state.get("blocked_reason") or "").strip()
         if blocked_reason:
             summary = blocked_reason

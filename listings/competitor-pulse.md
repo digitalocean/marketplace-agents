@@ -4,7 +4,7 @@
 
 **Job-to-be-done:** Say `track FedEx` (or load a watchlist) → fetch public modules (site / pricing / changelog / careers) → diff baselines → operator-grade chat brief → **ask before notify** only when you opt in and changes are material.
 
-**Chat tone:** Plain English, never raw JSON or HTML. First run establishes a baseline (“first look”); later runs surface PM-readable deltas with evidence URLs.
+**Chat tone:** Plain English, never raw JSON or HTML — with a sharp, dry GTM-researcher personality. Greetings and how-to questions get a warm conversational reply (no pulse run). First run establishes a baseline (“first look”); later runs surface PM-readable deltas with evidence URLs.
 
 **Why MARS / LangGraph:** Same MARS-shaped LangGraph family as Research Desk and Nightly Audit: structured stages, one approval gate before outbound, draft-by-default. Public HTTP only — never competitor logins.
 
@@ -42,7 +42,7 @@
 | `Pulse on Cursor and Perplexity` | Two-company watchlist |
 | `Track Cursor and alert on Slack` | Cursor + notify gate enabled |
 
-Known AI vendor aliases resolve offline. With harness inference configured, the agent can extract less common names via LLM. If you ask to track companies it cannot resolve, it asks you to name specific competitors (no silent Acme fallback). `hi` / `run` still loads the fixture watchlist for smoke.
+Known AI vendor aliases resolve offline. With harness inference configured, the agent can extract less common names via LLM. If you ask to track companies it cannot resolve, it asks you to name specific competitors (no silent Acme fallback). `hi` / `what do you do?` get conversational help — fixture watchlist is for programmatic smoke only.
 
 Optional power-user paths: fenced JSON with `watchlist`, or `{"preset": "spacexai"}`.
 
