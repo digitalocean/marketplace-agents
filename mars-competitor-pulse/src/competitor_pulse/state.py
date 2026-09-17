@@ -13,6 +13,12 @@ class WatchItem(TypedDict, total=False):
     urls: dict[str, str]
 
 
+class InternalState(TypedDict, total=False):
+    """Graph-internal payload — never in input/output schemas or MARS stream text."""
+
+    watchlist: list[dict[str, Any]]
+
+
 class InputState(TypedDict, total=False):
     """MARS / doctl chat input — no watchlist (avoids empty ``{"watchlist":[]}`` echo)."""
 
@@ -54,10 +60,9 @@ class PulseState(TypedDict, total=False):
     user_message: str
     chat_ack: str
     intent: str  # chat | help | pulse | other
-    converse_reply: str  # internal: converse → report (not doctl ``text``)
 
-    # Intake (internal — not in InputState / OutputState)
-    watchlist: list[dict[str, Any]]
+    # Internal graph payload (not in InputState / OutputState / doctl text)
+    internal: InternalState
     watch_names: list[str]  # MARS-safe names (no raw watchlist JSON in stream)
     blocked_reason: str
     notify: bool

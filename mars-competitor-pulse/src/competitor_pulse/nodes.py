@@ -81,9 +81,55 @@ def _watch_names_from(watchlist: list[dict[str, Any]] | None) -> list[str]:
     ]
 
 
+def _state_watchlist(state: PulseState | dict[str, Any]) -> list[dict[str, Any]]:
+    internal = state.get("internal")
+    if isinstance(internal, dict):
+        wl = internal.get("watchlist")
+        if isinstance(wl, list):
+            return list(wl)
+    legacy = state.get("watchlist")
+    if isinstance(legacy, list):
+        return list(legacy)
+    return []
+
+
+def _watchlist_update(
+    state: PulseState | dict[str, Any],
+    watchlist: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Nest non-empty watchlist under ``internal``; omit key when empty."""
+    wl = list(watchlist or [])
+    if not wl:
+        return {}
+    internal = dict(state.get("internal") or {})
+    internal["watchlist"] = wl
+    return {"internal": internal}
+
+
+def _watchlist_from_update(full: dict[str, Any]) -> list[dict[str, Any]]:
+    internal = full.get("internal")
+    if isinstance(internal, dict):
+        wl = internal.get("watchlist")
+        if isinstance(wl, list):
+            return list(wl)
+    legacy = full.get("watchlist")
+    if isinstance(legacy, list):
+        return list(legacy)
+    return []
+
+
+def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
+    """Drop internal/watchlist keys from node stream updates."""
+    return {
+        key: value
+        for key, value in full.items()
+        if key not in {"watchlist", "internal"}
+    }
+
+
 def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
     """Expose pulse results to MARS without raw watchlist JSON in stream updates."""
-    watchlist = list(state.get("watchlist") or [])
+    watchlist = _state_watchlist(state)
     out: dict[str, Any] = {
         "watch_names": _watch_names_from(watchlist),
     }
@@ -119,9 +165,9 @@ def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mars_safe_intake_update(full: dict[str, Any]) -> dict[str, Any]:
-    """Strip watchlist from intake stream updates; keep watch_names for labels."""
-    watchlist = list(full.get("watchlist") or [])
-    out = {key: value for key, value in full.items() if key != "watchlist"}
+    """Strip internal watchlist from intake stream updates; keep watch_names."""
+    watchlist = _watchlist_from_update(full)
+    out = _mars_stream_safe_update(full)
     if watchlist or full.get("intent") == "pulse":
         out["watch_names"] = _watch_names_from(watchlist)
     return out
@@ -180,10 +226,10 @@ def _apply_intake_overlay(state: PulseState, payload: dict[str, Any]) -> dict[st
     """Overlay JSON keys onto intake fields when state lacks them."""
     out: dict[str, Any] = {}
 
-    state_watchlist = list(state.get("watchlist") or [])
+    state_watchlist = _state_watchlist(state)
     payload_watchlist = payload.get("watchlist")
     if not state_watchlist and isinstance(payload_watchlist, list) and payload_watchlist:
-        out["watchlist"] = payload_watchlist
+        out["watchlist"] = list(payload_watchlist)
 
     if "notify" not in state and "notify" in payload:
         out["notify"] = bool(payload.get("notify"))
@@ -214,7 +260,7 @@ def _resolve_watchlist(
     human_text: str,
 ) -> dict[str, Any]:
     """Resolve watchlist with source metadata for intake defaults."""
-    watchlist = list(overlay.get("watchlist") or state.get("watchlist") or [])
+    watchlist = list(overlay.get("watchlist") or _state_watchlist(state))
     if watchlist:
         return {"watchlist": watchlist, "from_nl": False, "blocked": False}
 
@@ -290,9 +336,8 @@ def _delta_bullet(d: dict[str, Any]) -> str:
 
 def intake(state: PulseState) -> dict[str, Any]:
     if state.get("force_blocked"):
-        return {
+        update: dict[str, Any] = {
             "status": "blocked",
-            "watchlist": list(state.get("watchlist") or []),
             "notify": bool(state.get("notify")),
             "blocked_reason": "Blocked: fetch/tools unavailable.",
             "stage_summaries": _append_summary(
@@ -302,6 +347,8 @@ def intake(state: PulseState) -> dict[str, Any]:
             "material": False,
             "skipped": False,
         }
+        update.update(_watchlist_update(state, _state_watchlist(state)))
+        return update
 
     human_text = _human_message_text(state.get("messages"))
     if not human_text.strip():
@@ -315,7 +362,7 @@ def intake(state: PulseState) -> dict[str, Any]:
     parsed_nl = parse_watchlist_from_message(nl_text) if nl_text else {}
     intent = classify_intent(
         nl_text,
-        state_watchlist=list(state.get("watchlist") or []),
+        state_watchlist=_state_watchlist(state),
         overlay_watchlist=(
             overlay.get("watchlist")
             if isinstance(overlay.get("watchlist"), list)
@@ -329,7 +376,6 @@ def intake(state: PulseState) -> dict[str, Any]:
         return {
             "intent": intent,
             "status": intent,
-            "watchlist": [],
             "notify": False,
             "stage_summaries": _append_summary(
                 state, f"intake: {intent} — conversational"
@@ -350,7 +396,6 @@ def intake(state: PulseState) -> dict[str, Any]:
         )
         return {
             "status": "blocked",
-            "watchlist": [],
             "notify": False,
             "blocked_reason": blocked_summary,
             "stage_summaries": _append_summary(
@@ -401,7 +446,7 @@ def intake(state: PulseState) -> dict[str, Any]:
     )
     return {
         "intent": "pulse",
-        "watchlist": watchlist,
+        **_watchlist_update(state, watchlist),
         "notify": notify,
         "channel": channel,
         "fixture_dir": fixture_dir,
@@ -427,7 +472,7 @@ def intake_node(state: PulseState) -> dict[str, Any]:
 def execute_pulse(state: PulseState) -> dict[str, Any]:
     """Run plan→draft as one streamed node; restore watchlist internally."""
     current: dict[str, Any] = dict(state)
-    if current.get("intent") == "pulse" and not current.get("watchlist"):
+    if current.get("intent") == "pulse" and not _state_watchlist(current):
         current.update(intake(state))
     for stage in (plan, gather, analyze, draft):
         update = stage(current)  # type: ignore[arg-type]
@@ -445,7 +490,7 @@ def plan(state: PulseState) -> dict[str, Any]:
     if state.get("status") == "blocked":
         return {}
 
-    watchlist = list(state.get("watchlist") or [])
+    watchlist = _state_watchlist(state)
     modules = modules_from_watchlist(watchlist)
     run_id = f"pulse-{uuid.uuid4().hex[:10]}"
     return {
@@ -493,7 +538,7 @@ def gather(state: PulseState) -> dict[str, Any]:
     if state.get("status") == "blocked":
         return {}
 
-    watchlist = list(state.get("watchlist") or [])
+    watchlist = _state_watchlist(state)
     snapshot_dir = Path(state.get("snapshot_dir") or default_snapshot_dir())
     allow_net = bool(state.get("allow_net"))
     fetched_at = _now_iso()
@@ -767,19 +812,21 @@ def route_after_intake(state: PulseState) -> str:
 
 
 def converse(state: PulseState) -> dict[str, Any]:
-    """Single warm reply for chat / help / ambiguous — no fetch or deltas."""
+    """Single warm reply for chat / help / ambiguous — ends with one AIMessage."""
     intent = (state.get("intent") or "chat").strip().lower()
     human_text = _human_message_text(state.get("messages"))
     if not human_text.strip():
         human_text = (state.get("user_message") or "").strip()
     reply = conversational_reply(intent, human_text)
     return {
-        "converse_reply": reply,
         "status": intent,
         "material": False,
         "deltas": [],
         "delta_count": 0,
+        "next_hint": "Name companies to track or ask how this works.",
+        "artifacts": [],
         "stage_summaries": _append_summary(state, f"converse: {intent}"),
+        **_assistant_reply(reply, None),
     }
 
 
@@ -903,8 +950,7 @@ def _format_first_run_report(state: PulseState) -> str:
 def _format_quiet_report(state: PulseState) -> str:
     names = list(state.get("watch_names") or [])
     if not names:
-        watchlist = list(state.get("watchlist") or [])
-        names = [w.get("name") or "?" for w in watchlist]
+        names = _watch_names_from(_state_watchlist(state))
     modules = state.get("modules") or []
     return (
         f"**No changes** since the last pulse for {', '.join(names) or 'your watchlist'}.\n\n"
@@ -942,13 +988,9 @@ def report(state: PulseState) -> dict[str, Any]:
     status = state.get("status") or "ok"
     first_run = bool(state.get("first_run"))
     material = bool(state.get("material"))
-    watch_n = len(state.get("watchlist") or [])
+    watch_n = len(_state_watchlist(state))
 
-    if status in {"chat", "help", "other"}:
-        summary = (state.get("converse_reply") or "").strip()
-        next_hint = "Name companies to track or ask how this works."
-        out_status = status
-    elif status == "blocked":
+    if status == "blocked":
         blocked_reason = (state.get("blocked_reason") or "").strip()
         if blocked_reason:
             summary = blocked_reason

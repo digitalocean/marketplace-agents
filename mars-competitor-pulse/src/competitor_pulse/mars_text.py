@@ -9,7 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from competitor_pulse.chat import contains_watchlist_json
 
-_WATCHLIST_OVERLAY_KEY = "watchlist"
+# Observed production doctl concat: prose string fields from stream updates.
+_STREAM_PROSE_KEYS = ("human_summary", "converse_reply", "chat_ack")
 
 
 def assemble_doctl_prompt_text(
@@ -21,9 +22,11 @@ def assemble_doctl_prompt_text(
     Observed production behavior concatenates:
     1. Serialized input ``watchlist`` when the exported input schema includes it
        (often ``[]`` from schema defaults — fixed by omitting ``watchlist`` from
-       ``input_schema``)
-    2. Each node update's ``human_summary`` (stream bubbles)
-    3. Each streamed ``AIMessage`` content
+       ``input_schema`` and nesting under ``internal``)
+    2. Each node update's ``watchlist`` / ``internal.watchlist`` when present
+    3. Prose string fields from stream updates (``converse_reply``, ``chat_ack``,
+       ``human_summary``)
+    4. Each streamed ``AIMessage`` content
     """
     text = ""
     input_props = (graph.get_input_jsonschema().get("properties") or {})
@@ -33,9 +36,18 @@ def assemble_doctl_prompt_text(
     for chunk in graph.stream(payload, stream_mode="updates"):
         for _node, update in chunk.items():
             u = update or {}
-            summary = u.get("human_summary")
-            if summary:
-                text += str(summary)
+            if "watchlist" in u:
+                text += json.dumps({"watchlist": u["watchlist"]}, separators=(",", ":"))
+            internal = u.get("internal")
+            if isinstance(internal, dict) and "watchlist" in internal:
+                text += json.dumps(
+                    {"watchlist": internal["watchlist"]},
+                    separators=(",", ":"),
+                )
+            for key in _STREAM_PROSE_KEYS:
+                val = u.get(key)
+                if val:
+                    text += str(val)
             for msg in u.get("messages") or []:
                 if isinstance(msg, AIMessage):
                     content = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -85,3 +97,16 @@ def hi_chat_payload(*, include_empty_watchlist: bool = False) -> dict[str, Any]:
     if include_empty_watchlist:
         payload["watchlist"] = []
     return payload
+
+
+def watchlist_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read nested internal watchlist (or legacy top-level in tests)."""
+    internal = state.get("internal")
+    if isinstance(internal, dict):
+        wl = internal.get("watchlist")
+        if isinstance(wl, list):
+            return list(wl)
+    legacy = state.get("watchlist")
+    if isinstance(legacy, list):
+        return list(legacy)
+    return []

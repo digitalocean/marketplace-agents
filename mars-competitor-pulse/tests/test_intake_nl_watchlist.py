@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 from competitor_pulse.intake_parse import parse_watchlist_from_message
 from competitor_pulse.nodes import intake
 from competitor_pulse.pulse_diff import default_watchlist
+from competitor_pulse.mars_text import watchlist_from_state
 
 
 def _offline(monkeypatch):
@@ -45,7 +46,7 @@ def test_intake_nl_watchlist_sets_allow_net(monkeypatch):
             ]
         }
     )
-    names = {item["name"] for item in result["watchlist"]}
+    names = {item["name"] for item in watchlist_from_state(result)}
     assert "OpenAI" in names
     assert "Anthropic" in names
     assert "Google AI" in names
@@ -67,7 +68,7 @@ def test_intake_json_still_works(monkeypatch):
             ]
         }
     )
-    assert result["watchlist"] == custom
+    assert watchlist_from_state(result) == custom
     assert result["allow_net"] is False
 
 
@@ -75,14 +76,15 @@ def test_intake_generic_message_routes_to_chat(monkeypatch):
     _offline(monkeypatch)
     result = intake({"messages": [HumanMessage(content="hi")]})
     assert result.get("intent") == "chat"
-    assert result["watchlist"] == []
+    assert "watchlist" not in result
+    assert "internal" not in result
     assert result["status"] == "chat"
 
 
 def test_intake_no_message_uses_acme_default(monkeypatch):
     _offline(monkeypatch)
     result = intake({})
-    assert result["watchlist"] == default_watchlist()
+    assert watchlist_from_state(result) == default_watchlist()
 
 
 def test_intake_unresolved_track_request_blocked(monkeypatch):
@@ -95,11 +97,12 @@ def test_intake_unresolved_track_request_blocked(monkeypatch):
         }
     )
     assert result["status"] == "blocked"
-    assert result["watchlist"] == []
+    assert "watchlist" not in result
+    assert "internal" not in result
     assert "resolve" in (result.get("blocked_reason") or "").lower()
     names = {item["name"] for item in default_watchlist()}
     assert "Acme" not in names or "Acme" not in {
-        item["name"] for item in result["watchlist"]
+        item["name"] for item in watchlist_from_state(result)
     }
 
 
@@ -113,4 +116,4 @@ def test_intake_notify_from_nl(monkeypatch):
         }
     )
     assert result["notify"] is True
-    assert any(item["name"] == "Cursor" for item in result["watchlist"])
+    assert any(item["name"] == "Cursor" for item in watchlist_from_state(result))

@@ -11,7 +11,7 @@ from competitor_pulse.intent import classify_intent, is_chat_message, is_help_me
 from competitor_pulse.nodes import intake
 from competitor_pulse.pulse_diff import default_watchlist
 
-from pulse_helpers import assistant_summary, invoke_graph, invoke_graph_full
+from pulse_helpers import assistant_summary, invoke_graph, invoke_graph_full, watchlist_from_state
 
 
 def _offline(monkeypatch):
@@ -36,10 +36,9 @@ def test_intake_hi_is_chat_not_acme(monkeypatch):
     _offline(monkeypatch)
     result = intake({"messages": [HumanMessage(content="hi")]})
     assert result.get("intent") == "chat"
-    assert result.get("watchlist") == []
-    assert result.get("status") == "chat"
-    names = {item["name"] for item in default_watchlist()}
-    assert "Acme" not in names or not result.get("watchlist")
+    assert watchlist_from_state(result) == []
+    assert "watchlist" not in result
+    assert "internal" not in result
 
 
 def test_intake_no_message_still_fixture_watchlist(monkeypatch):
@@ -47,7 +46,7 @@ def test_intake_no_message_still_fixture_watchlist(monkeypatch):
     _offline(monkeypatch)
     result = intake({})
     assert result.get("intent") == "pulse"
-    assert result["watchlist"] == default_watchlist()
+    assert watchlist_from_state(result) == default_watchlist()
 
 
 def test_hi_greeting_full_graph(monkeypatch):
@@ -85,7 +84,9 @@ def test_run_alone_not_acme_fixture(monkeypatch):
     g = compile_graph()
     result = invoke_graph_full(g, {"messages": [HumanMessage(content="run")]})
     assert result.get("status") == "chat"
-    assert not any(item.get("name") == "Acme" for item in (result.get("watchlist") or []))
+    assert not any(
+        item.get("name") == "Acme" for item in watchlist_from_state(result)
+    )
     summaries = " ".join(result.get("stage_summaries") or [])
     assert "gather:" not in summaries
 
