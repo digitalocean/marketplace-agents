@@ -89,6 +89,27 @@ def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in full.items() if key != "human_summary"}
 
 
+def _normalize_decision(raw: Any) -> str:
+    """approve|deny — MARS harness may send bool, {approved: true}, or strings."""
+    if isinstance(raw, dict):
+        if "approved" in raw:
+            return "approve" if raw.get("approved") else "deny"
+        raw = (
+            raw.get("decision")
+            or raw.get("value")
+            or raw.get("choice")
+            or "deny"
+        )
+    if isinstance(raw, bool):
+        return "approve" if raw else "deny"
+    decision_s = str(raw).strip().lower()
+    if decision_s in {"approve", "approved", "yes", "y", "ok", "okay", "true"}:
+        return "approve"
+    if decision_s in {"deny", "denied", "no", "n", "false"}:
+        return "deny"
+    return "deny"
+
+
 # ---------------------------------------------------------------------------
 # intake
 # ---------------------------------------------------------------------------
@@ -235,13 +256,17 @@ def plan(state: ResearchState) -> dict[str, Any]:
         "seed_urls": list(state.get("seed_urls") or []),
         "fixture_sources": list(state.get("fixture_sources") or []),
     }
-    return {
+    out: dict[str, Any] = {
         "subquestions": subquestions,
         "search_queries": search_queries,
         "pending_research": pending,
-        "human_summary": summary,
         "stage_summaries": _append_summary(state, "plan: research plan ready"),
     }
+    if state.get("skip_plan_confirm") or state.get("plan_confirmed"):
+        out["human_summary"] = summary
+    else:
+        out.update(_assistant_reply(summary))
+    return out
 
 
 def should_confirm_plan(state: ResearchState) -> str:
@@ -275,11 +300,7 @@ def confirm_plan(state: ResearchState) -> dict[str, Any]:
         "choices": ["approve", "deny"],
     }
     decision = interrupt(payload)
-    if isinstance(decision, dict):
-        decision = decision.get("decision") or decision.get("value") or "deny"
-    decision_s = str(decision).strip().lower()
-    if decision_s not in {"approve", "deny"}:
-        decision_s = "deny"
+    decision_s = _normalize_decision(decision)
     if decision_s == "approve":
         return {
             "plan_confirmed": True,
@@ -715,12 +736,7 @@ def ask(state: ResearchState) -> dict[str, Any]:
         "choices": ["approve", "deny"],
     }
     decision = interrupt(payload)
-    # Normalize resume value
-    if isinstance(decision, dict):
-        decision = decision.get("decision") or decision.get("value") or "deny"
-    decision_s = str(decision).strip().lower()
-    if decision_s not in {"approve", "deny"}:
-        decision_s = "deny"
+    decision_s = _normalize_decision(decision)
     return {
         "pending_action": "send_outbound",
         "channel": channel,
@@ -732,7 +748,7 @@ def ask(state: ResearchState) -> dict[str, Any]:
 
 
 def act(state: ResearchState) -> dict[str, Any]:
-    decision = (state.get("decision") or "deny").lower()
+    decision = _normalize_decision(state.get("decision") or "deny")
     if decision != "approve":
         return {
             "sent": False,

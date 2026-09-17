@@ -69,15 +69,24 @@ def _programmatic_audit(state: AuditState) -> bool:
 
 
 def _normalize_decision(raw: Any) -> str:
-    """Primary: approve|deny strings. Optional legacy dict compat (undocumented)."""
+    """approve|deny — MARS harness may send bool, {approved: true}, or strings."""
     if isinstance(raw, dict):
         if "approved" in raw:
             return "approve" if raw.get("approved") else "deny"
-        raw = raw.get("decision") or raw.get("value") or "deny"
+        raw = (
+            raw.get("decision")
+            or raw.get("value")
+            or raw.get("choice")
+            or "deny"
+        )
+    if isinstance(raw, bool):
+        return "approve" if raw else "deny"
     decision_s = str(raw).strip().lower()
-    if decision_s not in {"approve", "deny"}:
+    if decision_s in {"approve", "approved", "yes", "y", "ok", "okay", "true"}:
+        return "approve"
+    if decision_s in {"deny", "denied", "no", "n", "false"}:
         return "deny"
-    return decision_s
+    return "deny"
 
 
 # ---------------------------------------------------------------------------
@@ -213,14 +222,18 @@ def plan(state: AuditState) -> dict[str, Any]:
         "area_hint": state.get("area_hint") or "",
         "fixture_path": state.get("fixture_path") or "",
     }
-    return {
+    out: dict[str, Any] = {
         "area": area,
         "rationale": rationale,
         "scope_limits": scope_limits,
         "pending_audit": pending,
-        "human_summary": summary,
         "stage_summaries": _append_summary(state, f"plan: area={area}"),
     }
+    if state.get("skip_plan_confirm") or state.get("plan_confirmed"):
+        out["human_summary"] = summary
+    else:
+        out.update(_assistant_reply(summary))
+    return out
 
 
 def should_confirm_plan(state: AuditState) -> str:

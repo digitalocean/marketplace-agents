@@ -8,6 +8,7 @@ from langgraph.types import Command
 
 from audit_helpers import assistant_summary
 from nightly_repo_audit.graph import compile_graph
+from nightly_repo_audit.mars_text import last_assistant_text
 from nightly_repo_audit.repo_scan import default_fixture_path
 
 FIXTURE = str(default_fixture_path())
@@ -39,8 +40,36 @@ def test_plan_confirm_interrupt_before_gather(monkeypatch):
     body = payload.get("body") or ""
     assert body.startswith("Want me to run this audit?")
     assert "Run it?" in body
+    visible = last_assistant_text(result)
+    assert visible.startswith("Want me to run this audit?")
+    assert "Run it?" in visible
     summaries = " ".join(result.get("stage_summaries") or [])
     assert "gather:" not in summaries
+
+
+def test_plan_confirm_resume_harness_approved_true(monkeypatch):
+    """MARS --on-hitl approve may resume {approved: true} or bare True."""
+    _offline(monkeypatch)
+    for resume_val in ({"approved": True}, True):
+        g = compile_graph(checkpointer=MemorySaver())
+        cfg = {
+            "configurable": {"thread_id": f"nightly-hitl-{type(resume_val).__name__}"}
+        }
+        g.invoke(
+            {
+                "messages": [HumanMessage(content="Audit acme/widgets on main")],
+                "repo": "acme/widgets",
+                "ref": "main",
+                "fixture_path": FIXTURE,
+            },
+            cfg,
+        )
+        final = g.invoke(Command(resume=resume_val), cfg)
+        assert final.get("status") != "plan_denied"
+        snap = g.get_state(cfg).values
+        assert snap.get("plan_confirmed") is True
+        summaries = " ".join(snap.get("stage_summaries") or [])
+        assert "gather:" in summaries
 
 
 def test_plan_confirm_deny_no_gather(monkeypatch):
