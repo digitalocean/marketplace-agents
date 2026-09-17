@@ -46,7 +46,7 @@ def test_outbound_reaches_interrupt(monkeypatch):
     interrupts = result["__interrupt__"]
     assert interrupts
     payload = interrupts[0].value
-    assert payload.get("title") == "Send research brief?"
+    assert payload.get("title") == "Want me to send this research brief via slack?"
     assert payload.get("pending_action") == "send_outbound"
     assert "approve" in payload.get("choices", [])
 
