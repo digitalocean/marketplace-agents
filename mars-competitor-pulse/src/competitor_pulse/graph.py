@@ -16,7 +16,7 @@ from competitor_pulse.nodes import (
     route_after_intake,
     should_ask,
 )
-from competitor_pulse.state import PulseState
+from competitor_pulse.state import InputState, OutputState, PulseState
 
 
 def build_graph() -> StateGraph:
@@ -25,8 +25,17 @@ def build_graph() -> StateGraph:
     ``intake_node`` classifies intent and routes; ``execute_pulse`` runs
     plan→draft without streaming raw ``watchlist`` JSON. Only ``report``
     appends chat ``messages``.
+
+    ``input_schema`` omits ``watchlist`` so Agent Server / doctl do not seed
+    ``{"watchlist":[]}`` into prompt ``text``. ``output_schema`` exposes
+    ``messages`` (not ``human_summary``) so doctl does not duplicate greeting
+    bubbles when concatenating stream updates.
     """
-    builder: StateGraph = StateGraph(PulseState)
+    builder: StateGraph = StateGraph(
+        PulseState,
+        input_schema=InputState,
+        output_schema=OutputState,
+    )
     builder.add_node("intake", intake_node)
     builder.add_node("converse", converse)
     builder.add_node("execute_pulse", execute_pulse)

@@ -11,12 +11,15 @@ from langgraph.types import Command
 
 from competitor_pulse.chat import contains_watchlist_json
 from competitor_pulse.graph import compile_graph
+from competitor_pulse.mars_text import assemble_doctl_prompt_text, hi_chat_payload
 from competitor_pulse.pulse_diff import (
     default_baseline_path,
     default_watchlist,
     material_baseline_path,
     quiet_baseline_path,
 )
+
+from pulse_helpers import assistant_summary, default_pulse_payload, invoke_graph
 
 _WATCHLIST_JSON_RE = re.compile(r'\{\s*"watchlist"\s*:', re.IGNORECASE)
 
@@ -40,49 +43,43 @@ def _last_ai_message(result: dict) -> AIMessage:
 def test_quiet_run_emits_assistant_message(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "baseline_path": str(quiet_baseline_path()),
-            "allow_net": False,
-        }
+    result = invoke_graph(
+        g,
+        default_pulse_payload(
+            notify=True,
+            baseline_path=str(quiet_baseline_path()),
+        ),
     )
     ai = _last_ai_message(result)
     content = ai.content.lower()
     assert "no changes" in content or "no material" in content
-    assert ai.content == result.get("human_summary")
+    assert ai.content == assistant_summary(result)
 
 
 def test_material_notify_off_includes_brief(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": False,
-            "baseline_path": str(material_baseline_path()),
-            "allow_net": False,
-        }
+    result = invoke_graph(
+        g,
+        default_pulse_payload(baseline_path=str(material_baseline_path())),
     )
     ai = _last_ai_message(result)
     assert "Competitor Pulse" in ai.content
     assert result.get("brief_md")
     assert result["brief_md"] in ai.content
-    assert ai.content.startswith(result.get("human_summary") or "")
+    assert ai.content.startswith(assistant_summary(result))
 
 
 def test_resume_approve_emits_assistant_message(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": "messages-approve"}}
-    mid = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "baseline_path": str(default_baseline_path()),
-            "allow_net": False,
-        },
+    mid = invoke_graph(
+        g,
+        default_pulse_payload(
+            notify=True,
+            baseline_path=str(default_baseline_path()),
+        ),
         cfg,
     )
     assert "__interrupt__" in mid
@@ -117,15 +114,10 @@ def test_no_assistant_message_contains_watchlist_json(monkeypatch):
     cases = [
         {"messages": [HumanMessage(content="hi")], "allow_net": False},
         {"messages": [HumanMessage(content="track fedex")], "allow_net": False},
-        {
-            "watchlist": default_watchlist(),
-            "notify": False,
-            "baseline_path": str(material_baseline_path()),
-            "allow_net": False,
-        },
+        default_pulse_payload(baseline_path=str(material_baseline_path())),
     ]
     for payload in cases:
-        result = g.invoke(payload)
+        result = invoke_graph(g, payload)
         for ai in _ai_messages(result):
             content = ai.content if isinstance(ai.content, str) else str(ai.content)
             assert not _WATCHLIST_JSON_RE.search(content)
@@ -173,3 +165,13 @@ def test_graph_compile_name(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
     assert g.name == "Competitor Pulse"
+
+
+def test_doctl_shaped_hi_text_clean(monkeypatch):
+    """Production doctl ``text``: no watchlist JSON prefix, greeting once."""
+    _offline(monkeypatch)
+    g = compile_graph()
+    text = assemble_doctl_prompt_text(g, hi_chat_payload())
+    assert not contains_watchlist_json(text)
+    assert text.count("Competitor Pulse") >= 1
+    assert text.index("Competitor Pulse") == text.rindex("Competitor Pulse")

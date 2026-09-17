@@ -6,7 +6,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from competitor_pulse.graph import compile_graph
-from competitor_pulse.pulse_diff import default_baseline_path, default_watchlist
+from pulse_helpers import default_pulse_payload, invoke_graph
+from competitor_pulse.pulse_diff import default_baseline_path
 
 
 def _offline(monkeypatch):
@@ -19,14 +20,13 @@ def _run_to_interrupt(monkeypatch, thread_id: str = "pulse-ask"):
     _offline(monkeypatch)
     g = compile_graph(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": thread_id}}
-    result = g.invoke(
-        {
-            "watchlist": default_watchlist(),
-            "notify": True,
-            "channel": "slack",
-            "baseline_path": str(default_baseline_path()),
-            "allow_net": False,
-        },
+    result = invoke_graph(
+        g,
+        default_pulse_payload(
+            notify=True,
+            channel="slack",
+            baseline_path=str(default_baseline_path()),
+        ),
         cfg,
     )
     return g, cfg, result

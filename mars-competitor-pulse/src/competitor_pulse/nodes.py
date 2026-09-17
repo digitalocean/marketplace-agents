@@ -199,6 +199,12 @@ def _apply_intake_overlay(state: PulseState, payload: dict[str, Any]) -> dict[st
     if "preset" in payload:
         out["preset"] = str(payload.get("preset") or "").strip()
 
+    for path_key in ("baseline_path", "snapshot_dir", "fixture_dir"):
+        state_path = (state.get(path_key) or "").strip()
+        payload_path = payload.get(path_key)
+        if not state_path and isinstance(payload_path, str) and payload_path.strip():
+            out[path_key] = payload_path.strip()
+
     return out
 
 
@@ -768,7 +774,7 @@ def converse(state: PulseState) -> dict[str, Any]:
         human_text = (state.get("user_message") or "").strip()
     reply = conversational_reply(intent, human_text)
     return {
-        "human_summary": reply,
+        "converse_reply": reply,
         "status": intent,
         "material": False,
         "deltas": [],
@@ -939,7 +945,7 @@ def report(state: PulseState) -> dict[str, Any]:
     watch_n = len(state.get("watchlist") or [])
 
     if status in {"chat", "help", "other"}:
-        summary = state.get("human_summary") or ""
+        summary = (state.get("converse_reply") or "").strip()
         next_hint = "Name companies to track or ask how this works."
         out_status = status
     elif status == "blocked":
@@ -987,7 +993,6 @@ def report(state: PulseState) -> dict[str, Any]:
     ]
 
     return {
-        "human_summary": summary,
         "status": out_status,
         "artifacts": artifacts,
         "next_hint": next_hint,

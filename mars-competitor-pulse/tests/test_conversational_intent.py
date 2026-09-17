@@ -11,6 +11,8 @@ from competitor_pulse.intent import classify_intent, is_chat_message, is_help_me
 from competitor_pulse.nodes import intake
 from competitor_pulse.pulse_diff import default_watchlist
 
+from pulse_helpers import assistant_summary, invoke_graph, invoke_graph_full
+
 
 def _offline(monkeypatch):
     monkeypatch.delenv("HARNESS_INFERENCE_API_KEY", raising=False)
@@ -51,8 +53,8 @@ def test_intake_no_message_still_fixture_watchlist(monkeypatch):
 def test_hi_greeting_full_graph(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke({"messages": [HumanMessage(content="hi")]})
-    summary = result.get("human_summary") or ""
+    result = invoke_graph_full(g, {"messages": [HumanMessage(content="hi")]})
+    summary = assistant_summary(result)
     assert result.get("status") == "chat"
     assert result.get("material") is False
     assert not result.get("deltas")
@@ -70,7 +72,7 @@ def test_help_question_full_graph(monkeypatch):
     result = g.invoke(
         {"messages": [HumanMessage(content="what do you do?")]}
     )
-    summary = result.get("human_summary") or ""
+    summary = assistant_summary(result)
     assert result.get("status") == "help"
     assert result.get("material") is False
     assert "baseline" in summary.lower() or "public" in summary.lower()
@@ -81,10 +83,9 @@ def test_help_question_full_graph(monkeypatch):
 def test_run_alone_not_acme_fixture(monkeypatch):
     _offline(monkeypatch)
     g = compile_graph()
-    result = g.invoke({"messages": [HumanMessage(content="run")]})
+    result = invoke_graph_full(g, {"messages": [HumanMessage(content="run")]})
     assert result.get("status") == "chat"
-    watchlist = result.get("watchlist") or []
-    assert not any(item.get("name") == "Acme" for item in watchlist)
+    assert not any(item.get("name") == "Acme" for item in (result.get("watchlist") or []))
     summaries = " ".join(result.get("stage_summaries") or [])
     assert "gather:" not in summaries
 
@@ -96,15 +97,16 @@ def test_track_fedex_still_baseline_pulse(monkeypatch, tmp_path):
     empty_bl.write_text(json.dumps({"version": 1, "entries": []}), encoding="utf-8")
 
     g = compile_graph()
-    result = g.invoke(
+    result = invoke_graph_full(
+        g,
         {
             "user_message": "track fedex",
             "notify": False,
             "baseline_path": str(empty_bl),
             "allow_net": False,
-        }
+        },
     )
-    summary = (result.get("human_summary") or "").lower()
+    summary = assistant_summary(result).lower()
     assert result.get("status") not in {"chat", "help", "other"}
     assert "fedex" in summary
     assert "acme" not in summary

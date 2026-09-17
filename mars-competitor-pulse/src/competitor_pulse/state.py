@@ -13,6 +13,39 @@ class WatchItem(TypedDict, total=False):
     urls: dict[str, str]
 
 
+class InputState(TypedDict, total=False):
+    """MARS / doctl chat input — no watchlist (avoids empty ``{"watchlist":[]}`` echo)."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    user_message: str
+    allow_net: bool
+    notify: bool
+    channel: str
+    fixture_dir: str
+    baseline_path: str
+    snapshot_dir: str
+    force_empty: bool
+    force_material: bool
+    force_blocked: bool
+
+
+class OutputState(TypedDict, total=False):
+    """Agent Server / doctl-visible output — chat text lives in ``messages`` only."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    status: str
+    material: bool
+    first_run: bool
+    brief_md: str
+    next_hint: str
+    artifacts: list[str]
+    delta_count: int
+    skipped: bool
+    notified: bool
+    notify_id: str
+    decision: str
+
+
 class PulseState(TypedDict, total=False):
     # MARS chat passes messages; intake parses JSON from HumanMessage
     messages: Annotated[list[AnyMessage], add_messages]
@@ -21,8 +54,9 @@ class PulseState(TypedDict, total=False):
     user_message: str
     chat_ack: str
     intent: str  # chat | help | pulse | other
+    converse_reply: str  # internal: converse → report (not doctl ``text``)
 
-    # Intake
+    # Intake (internal — not in InputState / OutputState)
     watchlist: list[dict[str, Any]]
     watch_names: list[str]  # MARS-safe names (no raw watchlist JSON in stream)
     blocked_reason: str
@@ -66,7 +100,7 @@ class PulseState(TypedDict, total=False):
 
     # Report
     status: str  # empty | notified | denied | blocked | error | ok | baseline
-    human_summary: str
+    human_summary: str  # run artifacts / smoke — not streamed for doctl ``text``
     stage_summaries: list[str]
     artifacts: list[str]
     next_hint: str
