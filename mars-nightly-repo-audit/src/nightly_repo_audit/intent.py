@@ -21,6 +21,20 @@ _PLAN_CONFIRM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Run / domain language (check before meta help — ``cleanup`` etc. also appear in help topics).
+_AUDIT_REQUEST_RE = re.compile(
+    r"(?:"
+    r"^\s*audit\b|"
+    r"nightly\s+cleanup\b|"
+    r"\bcleanup\s+(?:on\s+|src\b|legacy\b|the\s+)|"
+    r"\brun\s+(?:an?\s+)?audit\b|"
+    r"\bscan\s+(?:the\s+)?(?:repo|slice|area|src)\b|"
+    r"\bprepare\s+(?:a\s+)?draft\s+pr\b|"
+    r"\baudit\s+[\w.-]+/"
+    r")",
+    re.IGNORECASE,
+)
+
 _HELP_RE = re.compile(
     r"\b("
     r"what\s+do\s+you\s+do|"
@@ -35,8 +49,6 @@ _HELP_RE = re.compile(
     r"limitations?|limits?|"
     r"getting\s+started|"
     r"instructions?|"
-    r"findings?|"
-    r"cleanup|"
     r"approve|"
     r"deny"
     r")\b",
@@ -49,6 +61,14 @@ def is_chat_message(text: str) -> bool:
     if not stripped:
         return False
     return bool(_CHAT_RE.match(stripped))
+
+
+def is_audit_request(text: str) -> bool:
+    """Domain run language — route to audit_plan before meta help."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    return bool(_AUDIT_REQUEST_RE.search(stripped))
 
 
 def is_help_message(text: str) -> bool:
@@ -75,6 +95,8 @@ def classify_intent(
     text = (human_text or "").strip()
     if pending_audit and is_plan_confirm(text):
         return "audit"
+    if is_audit_request(text):
+        return "audit_plan"
     if is_help_message(text):
         return "help"
     if is_chat_message(text):
