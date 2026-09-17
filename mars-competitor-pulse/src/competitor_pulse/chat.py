@@ -90,14 +90,21 @@ def looks_like_watchlist_json(text: str) -> bool:
     if not text:
         return False
     t = text.strip()
-    return t.startswith('{"watchlist"') or t.startswith('{"watchlist":')
+    return (
+        t.startswith('{"watchlist"')
+        or t.startswith('{"watchlist":')
+        or t.startswith('{"competitors"')
+        or t.startswith('{"competitors":')
+    )
 
 
-_WATCHLIST_JSON_RE = re.compile(r'\{\s*"watchlist"\s*:', re.IGNORECASE)
+_STATE_LIST_JSON_RE = re.compile(
+    r'\{\s*"(?:watchlist|competitors)"\s*:', re.IGNORECASE
+)
 
 
 def contains_watchlist_json(text: str) -> bool:
-    """True when text includes raw watchlist JSON (for chat bubble guards)."""
+    """True when text includes raw watchlist/competitors state JSON (chat guards)."""
     if not text:
         return False
-    return bool(_WATCHLIST_JSON_RE.search(text))
+    return bool(_STATE_LIST_JSON_RE.search(text))

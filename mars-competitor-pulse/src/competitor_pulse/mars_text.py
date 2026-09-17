@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -12,6 +13,34 @@ from competitor_pulse.chat import contains_watchlist_json
 # Observed production doctl concat: prose string fields from stream updates.
 _STREAM_PROSE_KEYS = ("human_summary", "converse_reply", "chat_ack")
 
+# Empty list fields doctl may prefix when a schema property name matches.
+_STATE_LIST_PREFIX_RE = re.compile(
+    r'^\s*\{\s*"(?:watchlist|competitors)"\s*:\s*\[\s*\]\s*\}',
+    re.IGNORECASE,
+)
+
+_GREETING_DEDUP_RE = re.compile(
+    r"(Hey there|Hey — I'm|Hey, welcome).{0,80}Competitor Pulse",
+    re.IGNORECASE,
+)
+
+
+def strip_doctl_artifacts(text: str) -> str:
+    """Model observed prod doctl ``text`` noise for test assertions only.
+
+    Strips leading ``{"watchlist":[]}`` / ``{"competitors":[]}`` prefixes and
+    deduplicates a repeated greeting block when platform concat doubles the
+    same ``AIMessage``.
+    """
+    out = _STATE_LIST_PREFIX_RE.sub("", text or "", count=1)
+    matches = list(_GREETING_DEDUP_RE.finditer(out))
+    if len(matches) >= 2:
+        first = matches[0]
+        second = matches[1]
+        if first.group(0) == second.group(0):
+            out = out[: second.start()] + out[second.end() :]
+    return out
+
 
 def assemble_doctl_prompt_text(
     graph: Any,
@@ -20,30 +49,36 @@ def assemble_doctl_prompt_text(
     """Best-effort model of how ``doctl agent prompt -o json`` builds ``text``.
 
     Observed production behavior concatenates:
-    1. Serialized input ``watchlist`` when the exported input schema includes it
-       (often ``[]`` from schema defaults — fixed by omitting ``watchlist`` from
-       ``input_schema`` and nesting under ``internal``)
-    2. Each node update's ``watchlist`` / ``internal.watchlist`` when present
+    1. Serialized input list fields when the exported input schema includes them
+       (often ``[]`` from schema defaults — fixed by omitting list fields from
+       ``input_schema`` and nesting under ``internal.competitors``)
+    2. Each node update's ``watchlist`` / ``competitors`` / ``internal.*`` when present
     3. Prose string fields from stream updates (``converse_reply``, ``chat_ack``,
        ``human_summary``)
     4. Each streamed ``AIMessage`` content
+    5. Final output ``messages`` (may duplicate step 4 — converse returns only
+       ``messages`` to mitigate)
     """
     text = ""
     input_props = (graph.get_input_jsonschema().get("properties") or {})
-    if "watchlist" in input_props and "watchlist" in payload:
-        text += json.dumps({"watchlist": payload["watchlist"]}, separators=(",", ":"))
+    for key in ("watchlist", "competitors"):
+        if key in input_props and key in payload:
+            text += json.dumps({key: payload[key]}, separators=(",", ":"))
 
     for chunk in graph.stream(payload, stream_mode="updates"):
         for _node, update in chunk.items():
             u = update or {}
-            if "watchlist" in u:
-                text += json.dumps({"watchlist": u["watchlist"]}, separators=(",", ":"))
+            for key in ("watchlist", "competitors"):
+                if key in u:
+                    text += json.dumps({key: u[key]}, separators=(",", ":"))
             internal = u.get("internal")
-            if isinstance(internal, dict) and "watchlist" in internal:
-                text += json.dumps(
-                    {"watchlist": internal["watchlist"]},
-                    separators=(",", ":"),
-                )
+            if isinstance(internal, dict):
+                for key in ("watchlist", "competitors"):
+                    if key in internal:
+                        text += json.dumps(
+                            {key: internal[key]},
+                            separators=(",", ":"),
+                        )
             for key in _STREAM_PROSE_KEYS:
                 val = u.get(key)
                 if val:
@@ -52,6 +87,12 @@ def assemble_doctl_prompt_text(
                 if isinstance(msg, AIMessage):
                     content = msg.content if isinstance(msg.content, str) else str(msg.content)
                     text += content
+
+    final = graph.invoke(payload)
+    for msg in final.get("messages") or []:
+        if isinstance(msg, AIMessage):
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            text += content
     return text
 
 
@@ -72,16 +113,19 @@ def summary_from_assistant_text(text: str) -> str:
 
 
 def prepare_programmatic_payload(state: dict[str, Any]) -> dict[str, Any]:
-    """Encode ``watchlist`` as a silent JSON HumanMessage (not in ``input_schema``).
+    """Encode competitors as a silent JSON HumanMessage (not in ``input_schema``).
 
-    Other invoke keys (``baseline_path``, ``notify``, …) stay top-level because
-    they remain in ``InputState``.
+    Accepts legacy ``watchlist`` or ``competitors`` invoke keys. Other invoke keys
+    (``baseline_path``, ``notify``, …) stay top-level because they remain in
+    ``InputState``.
     """
     payload = dict(state)
-    watchlist = payload.pop("watchlist", None)
-    if watchlist is not None:
+    competitors = payload.pop("competitors", None)
+    if competitors is None:
+        competitors = payload.pop("watchlist", None)
+    if competitors is not None:
         existing = payload.get("messages") or []
-        msgs = [HumanMessage(content=json.dumps({"watchlist": watchlist}))]
+        msgs = [HumanMessage(content=json.dumps({"competitors": competitors}))]
         user_msg = (payload.get("user_message") or "").strip()
         if user_msg:
             msgs.append(HumanMessage(content=user_msg))
@@ -95,18 +139,24 @@ def hi_chat_payload(*, include_empty_watchlist: bool = False) -> dict[str, Any]:
         "allow_net": False,
     }
     if include_empty_watchlist:
-        payload["watchlist"] = []
+        payload["competitors"] = []
     return payload
 
 
-def watchlist_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Read nested internal watchlist (or legacy top-level in tests)."""
+def competitors_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read nested internal competitors (legacy watchlist keys accepted)."""
     internal = state.get("internal")
     if isinstance(internal, dict):
-        wl = internal.get("watchlist")
-        if isinstance(wl, list):
-            return list(wl)
-    legacy = state.get("watchlist")
-    if isinstance(legacy, list):
-        return list(legacy)
+        for key in ("competitors", "watchlist"):
+            wl = internal.get(key)
+            if isinstance(wl, list):
+                return list(wl)
+    for key in ("competitors", "watchlist"):
+        legacy = state.get(key)
+        if isinstance(legacy, list):
+            return list(legacy)
     return []
+
+
+# Back-compat alias for tests importing the old name.
+watchlist_from_state = competitors_from_state

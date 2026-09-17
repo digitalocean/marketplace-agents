@@ -19,7 +19,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 **How intake works**
 
-1. If `watchlist` is already in run state, it is kept.
+1. If `competitors` is already in run state (`internal.competitors`), it is kept. Legacy `watchlist` JSON keys in chat still parse.
 2. Otherwise the latest chat message is parsed:
    - **Known aliases** (OpenAI, Anthropic, Google/Gemini/DeepMind, Perplexity, Microsoft Copilot, xAI/Grok, Cursor, Meta/Llama, Mistral, Cohere, Amazon Bedrock/Q, Apple Intelligence, …) resolve **offline** to a watchlist with public HTTPS URLs.
    - With **harness inference** configured (`HARNESS_INFERENCE_API_KEY` or `OPENAI_API_KEY`), an LLM pass can extract less common company names and best-effort URLs.
@@ -35,7 +35,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 **Power users (optional)**
 
-- Fenced or raw JSON with `watchlist`, `notify`, `allow_net`, `channel`
+- Fenced or raw JSON with `competitors` (or legacy `watchlist`), `notify`, `allow_net`, `channel`
 - `{"preset": "spacexai"}` or the `SPACEXAI_PRESET` token for the bundled SpaceXAI competitor set
 
 ## What it does
@@ -51,7 +51,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 Competitor Pulse has a sharp, dry GTM-researcher personality in MARS chat — helpful, not corporate. Greetings and how-to questions get a single warm reply; pulse work stays factual.
 
-The graph speaks through a single `AIMessage`: chat/help paths end at `converse`; pulse paths finish at `report`. `watchlist` is nested under internal graph state (not in input/output schemas), so doctl never prefixes `{"watchlist":[]}`. Stream updates omit prose-only fields (`converse_reply`, `human_summary`) so doctl concat does not duplicate greetings. Never raw JSON or HTML source in chat bubbles.
+The graph speaks through a single `AIMessage`: chat/help paths end at `converse`; pulse paths finish at `report`. Competitor lists live under `internal.competitors` (not in input/output schemas) — the field was renamed from `watchlist` because doctl flattens schema property names into prompt `text` (production still echoed `{"watchlist":[]}` after top-level removal). JSON intake accepts both `watchlist` and `competitors` keys for backward compat. `converse` returns **only** `{"messages": [AIMessage(...)]}` so stream metadata is not concatenated with the final reply. **Remaining duplication risk:** if the platform still concat stream `AIMessage` + final output `messages`, greetings may appear twice until MARS/doctl dedupes — tests use `strip_doctl_artifacts()` to model observed prod. Never raw JSON or HTML source in chat bubbles.
 
 | Situation | What you see |
 |-----------|----------------|
@@ -204,16 +204,18 @@ ALLOW_NET=0 python scripts/smoke_invoke.py
 }
 ```
 
-**Power-user JSON** (optional) — explicit watchlist in chat or state:
+**Power-user JSON** (optional) — explicit competitor list in chat or state:
 
 ```json
 {
-  "watchlist": [{"name": "Acme", "urls": {"site": "https://example.com/acme/"}}],
+  "competitors": [{"name": "Acme", "urls": {"site": "https://example.com/acme/"}}],
   "notify": true,
   "channel": "slack",
   "allow_net": false
 }
 ```
+
+Legacy `watchlist` key in JSON chat payloads is still accepted.
 
 Expect across paths:
 

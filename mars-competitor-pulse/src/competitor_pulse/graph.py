@@ -23,12 +23,13 @@ def build_graph() -> StateGraph:
     """Construct the uncompiled StateGraph.
 
     ``intake_node`` classifies intent and routes; ``execute_pulse`` runs
-    plan→draft without streaming raw ``watchlist`` JSON. Only ``report``
-    appends chat ``messages``.
+    plan→draft without streaming raw competitor-list JSON. Only ``report``
+    appends chat ``messages`` on pulse paths.
 
-    ``watchlist`` lives under ``internal`` (not in input/output schemas) so
-    doctl never seeds ``{"watchlist":[]}``. Chat/help ``converse`` ends at END
-    with a single ``AIMessage`` — pulse paths still finish at ``report``.
+    ``competitors`` lives under ``internal`` (not in input/output schemas) so
+    doctl never seeds ``{"watchlist":[]}`` or ``{"competitors":[]}``. Chat/help
+    ``converse`` returns only ``messages`` and ends at END — pulse paths still
+    finish at ``report``.
     """
     builder: StateGraph = StateGraph(
         PulseState,

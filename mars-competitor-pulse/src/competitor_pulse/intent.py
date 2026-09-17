@@ -96,7 +96,7 @@ def classify_intent(
     if is_help_message(stripped):
         return "help"
 
-    if parsed.get("watchlist"):
+    if parsed.get("competitors") or parsed.get("watchlist"):
         return "pulse"
 
     if parsed.get("is_tracking_request") and not parsed.get("is_generic"):

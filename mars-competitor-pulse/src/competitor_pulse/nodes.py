@@ -81,55 +81,68 @@ def _watch_names_from(watchlist: list[dict[str, Any]] | None) -> list[str]:
     ]
 
 
-def _state_watchlist(state: PulseState | dict[str, Any]) -> list[dict[str, Any]]:
+def _competitors_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Accept legacy ``watchlist`` or ``competitors`` keys from JSON intake."""
+    for key in ("competitors", "watchlist"):
+        val = payload.get(key)
+        if isinstance(val, list):
+            return list(val)
+    return None
+
+
+def _state_competitors(state: PulseState | dict[str, Any]) -> list[dict[str, Any]]:
     internal = state.get("internal")
     if isinstance(internal, dict):
-        wl = internal.get("watchlist")
-        if isinstance(wl, list):
-            return list(wl)
-    legacy = state.get("watchlist")
-    if isinstance(legacy, list):
-        return list(legacy)
+        for key in ("competitors", "watchlist"):
+            wl = internal.get(key)
+            if isinstance(wl, list):
+                return list(wl)
+    for key in ("competitors", "watchlist"):
+        legacy = state.get(key)
+        if isinstance(legacy, list):
+            return list(legacy)
     return []
 
 
-def _watchlist_update(
+def _competitors_update(
     state: PulseState | dict[str, Any],
-    watchlist: list[dict[str, Any]] | None,
+    competitors: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    """Nest non-empty watchlist under ``internal``; omit key when empty."""
-    wl = list(watchlist or [])
+    """Nest non-empty competitors under ``internal``; omit key when empty."""
+    wl = list(competitors or [])
     if not wl:
         return {}
     internal = dict(state.get("internal") or {})
-    internal["watchlist"] = wl
+    internal["competitors"] = wl
     return {"internal": internal}
 
 
-def _watchlist_from_update(full: dict[str, Any]) -> list[dict[str, Any]]:
+def _competitors_from_update(full: dict[str, Any]) -> list[dict[str, Any]]:
     internal = full.get("internal")
     if isinstance(internal, dict):
-        wl = internal.get("watchlist")
-        if isinstance(wl, list):
-            return list(wl)
-    legacy = full.get("watchlist")
-    if isinstance(legacy, list):
-        return list(legacy)
+        for key in ("competitors", "watchlist"):
+            wl = internal.get(key)
+            if isinstance(wl, list):
+                return list(wl)
+    for key in ("competitors", "watchlist"):
+        legacy = full.get(key)
+        if isinstance(legacy, list):
+            return list(legacy)
     return []
 
 
 def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
-    """Drop internal/watchlist keys from node stream updates."""
+    """Drop internal/competitors keys from node stream updates."""
     return {
         key: value
         for key, value in full.items()
-        if key not in {"watchlist", "internal"}
+        if key not in {"watchlist", "competitors", "internal"}
     }
 
 
 def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
-    """Expose pulse results to MARS without raw watchlist JSON in stream updates."""
-    watchlist = _state_watchlist(state)
+    """Expose pulse results to MARS without raw competitors JSON in stream updates."""
+    watchlist = _state_competitors(state)
     out: dict[str, Any] = {
         "watch_names": _watch_names_from(watchlist),
     }
@@ -165,8 +178,8 @@ def _mars_safe_pulse_update(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mars_safe_intake_update(full: dict[str, Any]) -> dict[str, Any]:
-    """Strip internal watchlist from intake stream updates; keep watch_names."""
-    watchlist = _watchlist_from_update(full)
+    """Strip internal competitors from intake stream updates; keep watch_names."""
+    watchlist = _competitors_from_update(full)
     out = _mars_stream_safe_update(full)
     if watchlist or full.get("intent") == "pulse":
         out["watch_names"] = _watch_names_from(watchlist)
@@ -226,10 +239,10 @@ def _apply_intake_overlay(state: PulseState, payload: dict[str, Any]) -> dict[st
     """Overlay JSON keys onto intake fields when state lacks them."""
     out: dict[str, Any] = {}
 
-    state_watchlist = _state_watchlist(state)
-    payload_watchlist = payload.get("watchlist")
-    if not state_watchlist and isinstance(payload_watchlist, list) and payload_watchlist:
-        out["watchlist"] = list(payload_watchlist)
+    state_competitors = _state_competitors(state)
+    payload_competitors = _competitors_from_payload(payload)
+    if not state_competitors and payload_competitors:
+        out["competitors"] = payload_competitors
 
     if "notify" not in state and "notify" in payload:
         out["notify"] = bool(payload.get("notify"))
@@ -254,29 +267,32 @@ def _apply_intake_overlay(state: PulseState, payload: dict[str, Any]) -> dict[st
     return out
 
 
-def _resolve_watchlist(
+def _resolve_competitors(
     state: PulseState,
     overlay: dict[str, Any],
     human_text: str,
 ) -> dict[str, Any]:
-    """Resolve watchlist with source metadata for intake defaults."""
-    watchlist = list(overlay.get("watchlist") or _state_watchlist(state))
+    """Resolve competitor list with source metadata for intake defaults."""
+    overlay_list = overlay.get("competitors") or overlay.get("watchlist")
+    watchlist = list(overlay_list or _state_competitors(state))
     if watchlist:
-        return {"watchlist": watchlist, "from_nl": False, "blocked": False}
+        return {"competitors": watchlist, "from_nl": False, "blocked": False}
 
     preset = (overlay.get("preset") or "").strip().lower()
     if preset == "spacexai" or "SPACEXAI_PRESET" in human_text:
         return {
-            "watchlist": spacexai_watchlist(),
+            "competitors": spacexai_watchlist(),
             "from_nl": False,
             "blocked": False,
         }
 
     parsed = parse_watchlist_from_message(human_text)
-    nl_watchlist = list(parsed.get("watchlist") or [])
-    if nl_watchlist:
+    nl_competitors = list(
+        parsed.get("competitors") or parsed.get("watchlist") or []
+    )
+    if nl_competitors:
         return {
-            "watchlist": nl_watchlist,
+            "competitors": nl_competitors,
             "from_nl": True,
             "blocked": False,
             "notify": parsed.get("notify"),
@@ -287,14 +303,14 @@ def _resolve_watchlist(
         fallback = parse_track_message(human_text)
         if fallback:
             return {
-                "watchlist": fallback,
+                "competitors": fallback,
                 "from_nl": True,
                 "blocked": False,
                 "notify": parsed.get("notify"),
                 "source": "offline",
             }
         return {
-            "watchlist": [],
+            "competitors": [],
             "from_nl": True,
             "blocked": True,
             "notify": parsed.get("notify"),
@@ -306,13 +322,13 @@ def _resolve_watchlist(
 
     if not human_text.strip():
         return {
-            "watchlist": default_watchlist(),
+            "competitors": default_watchlist(),
             "from_nl": False,
             "blocked": False,
         }
 
     return {
-        "watchlist": [],
+        "competitors": [],
         "from_nl": False,
         "blocked": False,
     }
@@ -347,7 +363,7 @@ def intake(state: PulseState) -> dict[str, Any]:
             "material": False,
             "skipped": False,
         }
-        update.update(_watchlist_update(state, _state_watchlist(state)))
+        update.update(_competitors_update(state, _state_competitors(state)))
         return update
 
     human_text = _human_message_text(state.get("messages"))
@@ -360,14 +376,11 @@ def intake(state: PulseState) -> dict[str, Any]:
     nl_text = "" if looks_like_watchlist_json(human_text) else human_text
 
     parsed_nl = parse_watchlist_from_message(nl_text) if nl_text else {}
+    overlay_competitors = _competitors_from_payload(overlay) if overlay else None
     intent = classify_intent(
         nl_text,
-        state_watchlist=_state_watchlist(state),
-        overlay_watchlist=(
-            overlay.get("watchlist")
-            if isinstance(overlay.get("watchlist"), list)
-            else None
-        ),
+        state_watchlist=_state_competitors(state),
+        overlay_watchlist=overlay_competitors,
         overlay_preset=overlay.get("preset"),
         parsed_nl=parsed_nl,
     )
@@ -386,8 +399,8 @@ def intake(state: PulseState) -> dict[str, Any]:
             "notified": False,
         }
 
-    resolved = _resolve_watchlist(state, overlay, nl_text)
-    watchlist = list(resolved.get("watchlist") or [])
+    resolved = _resolve_competitors(state, overlay, nl_text)
+    watchlist = list(resolved.get("competitors") or [])
     from_nl = bool(resolved.get("from_nl"))
 
     if resolved.get("blocked"):
@@ -446,7 +459,7 @@ def intake(state: PulseState) -> dict[str, Any]:
     )
     return {
         "intent": "pulse",
-        **_watchlist_update(state, watchlist),
+        **_competitors_update(state, watchlist),
         "notify": notify,
         "channel": channel,
         "fixture_dir": fixture_dir,
@@ -472,7 +485,7 @@ def intake_node(state: PulseState) -> dict[str, Any]:
 def execute_pulse(state: PulseState) -> dict[str, Any]:
     """Run plan→draft as one streamed node; restore watchlist internally."""
     current: dict[str, Any] = dict(state)
-    if current.get("intent") == "pulse" and not _state_watchlist(current):
+    if current.get("intent") == "pulse" and not _state_competitors(current):
         current.update(intake(state))
     for stage in (plan, gather, analyze, draft):
         update = stage(current)  # type: ignore[arg-type]
@@ -490,7 +503,7 @@ def plan(state: PulseState) -> dict[str, Any]:
     if state.get("status") == "blocked":
         return {}
 
-    watchlist = _state_watchlist(state)
+    watchlist = _state_competitors(state)
     modules = modules_from_watchlist(watchlist)
     run_id = f"pulse-{uuid.uuid4().hex[:10]}"
     return {
@@ -538,7 +551,7 @@ def gather(state: PulseState) -> dict[str, Any]:
     if state.get("status") == "blocked":
         return {}
 
-    watchlist = _state_watchlist(state)
+    watchlist = _state_competitors(state)
     snapshot_dir = Path(state.get("snapshot_dir") or default_snapshot_dir())
     allow_net = bool(state.get("allow_net"))
     fetched_at = _now_iso()
@@ -812,22 +825,17 @@ def route_after_intake(state: PulseState) -> str:
 
 
 def converse(state: PulseState) -> dict[str, Any]:
-    """Single warm reply for chat / help / ambiguous — ends with one AIMessage."""
+    """Single warm reply for chat / help / ambiguous — ends with one AIMessage.
+
+    Returns only ``messages`` so doctl does not concat stream metadata with the
+    final output AIMessage (observed production duplication on ``hi``).
+    """
     intent = (state.get("intent") or "chat").strip().lower()
     human_text = _human_message_text(state.get("messages"))
     if not human_text.strip():
         human_text = (state.get("user_message") or "").strip()
     reply = conversational_reply(intent, human_text)
-    return {
-        "status": intent,
-        "material": False,
-        "deltas": [],
-        "delta_count": 0,
-        "next_hint": "Name companies to track or ask how this works.",
-        "artifacts": [],
-        "stage_summaries": _append_summary(state, f"converse: {intent}"),
-        **_assistant_reply(reply, None),
-    }
+    return _assistant_reply(reply, None)
 
 
 def should_ask(state: PulseState) -> str:
@@ -950,7 +958,7 @@ def _format_first_run_report(state: PulseState) -> str:
 def _format_quiet_report(state: PulseState) -> str:
     names = list(state.get("watch_names") or [])
     if not names:
-        names = _watch_names_from(_state_watchlist(state))
+        names = _watch_names_from(_state_competitors(state))
     modules = state.get("modules") or []
     return (
         f"**No changes** since the last pulse for {', '.join(names) or 'your watchlist'}.\n\n"
@@ -988,7 +996,7 @@ def report(state: PulseState) -> dict[str, Any]:
     status = state.get("status") or "ok"
     first_run = bool(state.get("first_run"))
     material = bool(state.get("material"))
-    watch_n = len(_state_watchlist(state))
+    watch_n = len(_state_competitors(state))
 
     if status == "blocked":
         blocked_reason = (state.get("blocked_reason") or "").strip()
