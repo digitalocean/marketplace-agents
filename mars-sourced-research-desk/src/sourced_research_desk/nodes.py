@@ -9,7 +9,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from sourced_research_desk.llm import get_llm, harness_env_available
+from sourced_research_desk.hygiene import hygiene_text
+from sourced_research_desk.llm import harness_env_available
+from sourced_research_desk.llm_http import plan_from_llm, suggest_urls_from_llm
+from sourced_research_desk.persona import ask_body, ask_title, research_plan_summary
 from sourced_research_desk.state import ResearchState
 
 _HTTP_ALLOW = {"http", "https"}
@@ -105,20 +108,23 @@ def plan(state: ResearchState) -> dict[str, Any]:
     if _deterministic_mode(state) or not harness_env_available():
         subquestions, search_queries = _plan_deterministic(question)
     else:
-        try:
-            llm = get_llm(temperature=0)
-            prompt = (
-                "You plan web research. Given a question, return exactly two lines:\n"
-                "SUBQUESTIONS: pipe-separated short subquestions (3 max)\n"
-                "QUERIES: pipe-separated search queries (3 max)\n"
-                f"Question: {question}"
-            )
-            text = str(llm.invoke(prompt).content)
+        text = plan_from_llm(question)
+        if text:
             subquestions, search_queries = _parse_plan_llm(text, question)
-        except Exception:
+        else:
             subquestions, search_queries = _plan_deterministic(question)
 
-    summary = f"Plan: {len(search_queries)} queries covering {len(subquestions)} subquestions."
+    outbound = (state.get("outbound") or "none").strip().lower()
+    summary = hygiene_text(
+        research_plan_summary(
+            question=question,
+            subquestions=subquestions,
+            search_queries=search_queries,
+            outbound=outbound,
+            destination=(state.get("destination") or "").strip(),
+            allow_net=not _deterministic_mode(state),
+        )
+    )
     return {
         "subquestions": subquestions,
         "search_queries": search_queries,
@@ -234,22 +240,14 @@ def gather(state: ResearchState) -> dict[str, Any]:
 
     # Optional LLM-suggested public URLs when live key present
     if harness_env_available() and not urls:
-        try:
-            llm = get_llm(temperature=0)
-            prompt = (
-                "Suggest up to 3 public https URLs (one per line, URL only) that "
-                f"would help research: {state.get('question')}\n"
-                "Prefer well-known docs, news, or official sites. No commentary."
-            )
-            text = str(llm.invoke(prompt).content)
+        text = suggest_urls_from_llm(state.get("question") or "")
+        if text:
             for line in text.splitlines():
                 cand = line.strip().strip("`").strip()
                 if cand.startswith("http") and _allowed_url(cand) and cand not in urls:
                     urls.append(cand)
                 if len(urls) >= 3:
                     break
-        except Exception:
-            pass
 
     sources = [_fetch_url(u) for u in urls]
     ok_n = sum(1 for s in sources if s.get("ok"))
@@ -441,7 +439,7 @@ def draft(state: ResearchState) -> dict[str, Any]:
     audience = state.get("audience") or "operators"
 
     if not claims:
-        brief = _draft_brief(question, audience, claims, conflicts)
+        brief = hygiene_text(_draft_brief(question, audience, claims, conflicts))
         return {
             "brief_md": brief,
             "claim_count": 0,
@@ -456,7 +454,7 @@ def draft(state: ResearchState) -> dict[str, Any]:
             ),
         }
 
-    brief = _draft_brief(question, audience, claims, conflicts)
+    brief = hygiene_text(_draft_brief(question, audience, claims, conflicts))
     dates = sorted(c.get("date", "") for c in claims if c.get("date"))
     oldest = dates[0] if dates else ""
     newest = dates[-1] if dates else ""
@@ -532,17 +530,20 @@ def ask(state: ResearchState) -> dict[str, Any]:
     newest = state.get("newest_source_date") or "n/a"
     conflicts = state.get("conflicts") or []
 
-    body = (
-        f"Send this brief via {channel}?\n\n"
-        f"To:      {destination}\n"
-        f"Subject: {subject}\n\n"
-        f"Preview:\n{preview_lines}\n\n"
-        f"Sources: {claim_count} claims · dated {oldest} → {newest}\n"
-        f"Conflicts flagged: {len(conflicts)}\n\n"
-        "This will post/send the draft above. It will not edit the brief further."
+    body = hygiene_text(
+        ask_body(
+            channel=channel,
+            destination=destination,
+            subject=subject,
+            preview_lines=preview_lines,
+            claim_count=int(claim_count),
+            oldest=oldest,
+            newest=newest,
+            conflicts_n=len(conflicts),
+        )
     )
     payload = {
-        "title": "Send research brief?",
+        "title": ask_title(channel=channel),
         "body": body,
         "pending_action": "send_outbound",
         "channel": channel,
@@ -644,7 +645,7 @@ def report(state: ResearchState) -> dict[str, Any]:
         )
 
     return {
-        "human_summary": summary,
+        "human_summary": hygiene_text(summary),
         "status": status,
         "stage_summaries": _append_summary(state, "report: complete"),
     }
