@@ -10,11 +10,13 @@ from competitor_pulse.nodes import (
     act,
     analyze,
     ask,
+    converse,
     draft,
     gather,
     intake,
     plan,
     report,
+    route_after_intake,
     should_ask,
 )
 from competitor_pulse.state import PulseState
@@ -24,6 +26,7 @@ def build_graph() -> StateGraph:
     """Construct the uncompiled StateGraph."""
     builder: StateGraph = StateGraph(PulseState)
     builder.add_node("intake", intake)
+    builder.add_node("converse", converse)
     builder.add_node("plan", plan)
     builder.add_node("gather", gather)
     builder.add_node("analyze", analyze)
@@ -33,7 +36,12 @@ def build_graph() -> StateGraph:
     builder.add_node("report", report)
 
     builder.add_edge(START, "intake")
-    builder.add_edge("intake", "plan")
+    builder.add_conditional_edges(
+        "intake",
+        route_after_intake,
+        {"converse": "converse", "plan": "plan", "report": "report"},
+    )
+    builder.add_edge("converse", "report")
     builder.add_edge("plan", "gather")
     builder.add_edge("gather", "analyze")
     builder.add_edge("analyze", "draft")
