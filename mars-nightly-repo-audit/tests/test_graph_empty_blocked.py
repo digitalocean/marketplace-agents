@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from audit_helpers import assistant_summary
 from nightly_repo_audit.graph import compile_graph
 from nightly_repo_audit.repo_scan import default_fixture_path
 
@@ -27,7 +28,7 @@ def test_empty_findings_no_interrupt(monkeypatch):
     assert "__interrupt__" not in result
     assert result.get("status") == "empty"
     assert not result.get("findings")
-    assert "No cleanup worth a PR" in (result.get("human_summary") or "")
+    assert "No cleanup worth a PR" in assistant_summary(result)
     summaries = result.get("stage_summaries") or []
     assert any("analyze" in s for s in summaries)
     assert any("report" in s for s in summaries)

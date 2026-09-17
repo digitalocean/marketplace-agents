@@ -8,12 +8,17 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from langchain_core.messages import AIMessage, HumanMessage
 
+from sourced_research_desk.converse import conversational_reply
 from sourced_research_desk.hygiene import hygiene_text
+from sourced_research_desk.intent import classify_intent
 from sourced_research_desk.llm import harness_env_available
 from sourced_research_desk.llm_http import plan_from_llm, suggest_urls_from_llm
 from sourced_research_desk.persona import ask_body, ask_title, research_plan_summary
 from sourced_research_desk.state import ResearchState
+
+ASSISTANT_DISPLAY_NAME = "Sourced Research Desk"
 
 _HTTP_ALLOW = {"http", "https"}
 _FETCH_TIMEOUT = 15.0
@@ -40,19 +45,65 @@ def _deterministic_mode(state: ResearchState) -> bool:
     return bool(fixtures) and not harness_env_available()
 
 
+def _human_message_text(messages: list[Any] | None) -> str:
+    for msg in reversed(messages or []):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+        if isinstance(msg, dict):
+            role = (msg.get("type") or msg.get("role") or "").lower()
+            if role in {"human", "user"}:
+                return str(msg.get("content") or "")
+    return ""
+
+
+def _assistant_reply(summary: str, brief_md: str | None = None) -> dict[str, Any]:
+    content = hygiene_text(summary or "")
+    brief = hygiene_text((brief_md or "").strip())
+    if brief and brief not in content:
+        content = f"{content}\n\n---\n\n{brief}"
+    return {
+        "messages": [
+            AIMessage(content=content, name=ASSISTANT_DISPLAY_NAME),
+        ]
+    }
+
+
+def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in full.items() if key != "human_summary"}
+
+
 # ---------------------------------------------------------------------------
 # intake
 # ---------------------------------------------------------------------------
 
 
 def intake(state: ResearchState) -> dict[str, Any]:
+    human_text = _human_message_text(state.get("messages"))
     question = (state.get("question") or "").strip()
+    if human_text.strip():
+        intent = classify_intent(human_text, has_question=bool(question))
+        if intent in {"chat", "help", "other"}:
+            reply = conversational_reply(intent, human_text)
+            return {
+                "intent": intent,
+                "status": intent,
+                "sent": False,
+                "skipped": False,
+                "unsourced": False,
+                **_assistant_reply(reply, None),
+            }
+        if not question:
+            question = human_text.strip()
+
     if not question:
+        blocked = "Blocked: missing question."
         return {
             "status": "blocked",
-            "human_summary": "Blocked: missing question.",
+            "human_summary": blocked,
             "stage_summaries": _append_summary(state, "intake: missing question"),
             "outbound": "none",
+            **_assistant_reply(blocked, None),
         }
     outbound = (state.get("outbound") or "none").strip().lower()
     if outbound not in {"none", "slack", "email"}:
@@ -61,6 +112,7 @@ def intake(state: ResearchState) -> dict[str, Any]:
     audience = (state.get("audience") or "operators").strip()
     summary = f"Researching: {question}"
     return {
+        "intent": "research",
         "question": question,
         "audience": audience,
         "outbound": outbound,
@@ -76,6 +128,17 @@ def intake(state: ResearchState) -> dict[str, Any]:
         "skipped": False,
         "unsourced": False,
     }
+
+
+def intake_node(state: ResearchState) -> dict[str, Any]:
+    return _mars_stream_safe_update(intake(state))
+
+
+def route_after_intake(state: ResearchState) -> str:
+    intent = (state.get("intent") or "research").strip().lower()
+    if intent in {"chat", "help", "other"}:
+        return "end"
+    return "plan"
 
 
 # ---------------------------------------------------------------------------
@@ -644,8 +707,12 @@ def report(state: ResearchState) -> dict[str, Any]:
             f"Message id: {state.get('message_id') or '—'}"
         )
 
+    attach_brief = state.get("brief_md") or None
+    if status in {"chat", "help", "other"}:
+        attach_brief = None
     return {
         "human_summary": hygiene_text(summary),
         "status": status,
         "stage_summaries": _append_summary(state, "report: complete"),
+        **_assistant_reply(summary, attach_brief),
     }

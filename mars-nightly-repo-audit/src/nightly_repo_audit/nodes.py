@@ -5,16 +5,57 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import AIMessage, HumanMessage
+
+from nightly_repo_audit.converse import conversational_reply
 from nightly_repo_audit.hygiene import hygiene_text
+from nightly_repo_audit.intent import classify_intent
 from nightly_repo_audit.persona import ask_body, ask_title
 from nightly_repo_audit.repo_scan import default_fixture_path, scan_repo
 from nightly_repo_audit.state import AuditState
+
+ASSISTANT_DISPLAY_NAME = "Nightly Repo Audit"
 
 
 def _append_summary(state: AuditState, line: str) -> list[str]:
     prev = list(state.get("stage_summaries") or [])
     prev.append(line)
     return prev
+
+
+def _human_message_text(messages: list[Any] | None) -> str:
+    for msg in reversed(messages or []):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+        if isinstance(msg, dict):
+            role = (msg.get("type") or msg.get("role") or "").lower()
+            if role in {"human", "user"}:
+                return str(msg.get("content") or "")
+    return ""
+
+
+def _assistant_reply(summary: str) -> dict[str, Any]:
+    return {
+        "messages": [
+            AIMessage(content=hygiene_text(summary or ""), name=ASSISTANT_DISPLAY_NAME),
+        ]
+    }
+
+
+def _mars_stream_safe_update(full: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in full.items() if key != "human_summary"}
+
+
+def _programmatic_audit(state: AuditState) -> bool:
+    return bool(
+        state.get("force_blocked")
+        or state.get("force_empty")
+        or (state.get("repo") or "").strip()
+        or (state.get("fixture_path") or "").strip()
+        or (state.get("area_hint") or "").strip()
+        or (state.get("ref") or "").strip()
+    )
 
 
 def _normalize_decision(raw: Any) -> str:
@@ -35,6 +76,20 @@ def _normalize_decision(raw: Any) -> str:
 
 
 def intake(state: AuditState) -> dict[str, Any]:
+    human_text = _human_message_text(state.get("messages"))
+    programmatic = _programmatic_audit(state) and not human_text.strip()
+    if human_text.strip() or state.get("messages"):
+        intent = classify_intent(human_text, programmatic_audit=programmatic)
+        if intent in {"chat", "help", "other"}:
+            reply = conversational_reply(intent, human_text)
+            return {
+                "intent": intent,
+                "status": intent,
+                "skipped": False,
+                "findings": [],
+                **_assistant_reply(reply),
+            }
+
     if state.get("force_blocked"):
         return {
             "status": "blocked",
@@ -61,6 +116,7 @@ def intake(state: AuditState) -> dict[str, Any]:
 
     summary = f"Auditing `{repo}` @ `{ref}`."
     return {
+        "intent": "audit",
         "repo": repo,
         "ref": ref,
         "trigger": trigger,
@@ -72,6 +128,17 @@ def intake(state: AuditState) -> dict[str, Any]:
         "skipped": False,
         "findings": [],
     }
+
+
+def intake_node(state: AuditState) -> dict[str, Any]:
+    return _mars_stream_safe_update(intake(state))
+
+
+def route_after_intake(state: AuditState) -> str:
+    intent = (state.get("intent") or "audit").strip().lower()
+    if intent in {"chat", "help", "other"}:
+        return "end"
+    return "plan"
 
 
 # ---------------------------------------------------------------------------
@@ -452,10 +519,12 @@ def report(state: AuditState) -> dict[str, Any]:
         if a
     ]
 
+    cleaned = hygiene_text(summary)
     return {
-        "human_summary": hygiene_text(summary),
+        "human_summary": cleaned,
         "status": status,
         "artifacts": artifacts,
         "next_hint": next_hint,
         "stage_summaries": _append_summary(state, "report: complete"),
+        **_assistant_reply(cleaned),
     }

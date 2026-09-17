@@ -12,18 +12,27 @@ from nightly_repo_audit.nodes import (
     ask,
     draft,
     gather,
-    intake,
+    intake_node,
     plan,
     report,
+    route_after_intake,
     should_ask,
 )
-from nightly_repo_audit.state import AuditState
+from nightly_repo_audit.state import AuditState, InputState, OutputState
 
 
 def build_graph() -> StateGraph:
-    """Construct the uncompiled StateGraph."""
-    builder: StateGraph = StateGraph(AuditState)
-    builder.add_node("intake", intake)
+    """Construct the uncompiled StateGraph.
+
+    Chat/help/other: ``intake`` emits a single ``AIMessage`` and routes to END.
+    Audit: ``intake`` → plan → gather → analyze → draft → optional ask → report.
+    """
+    builder: StateGraph = StateGraph(
+        AuditState,
+        input_schema=InputState,
+        output_schema=OutputState,
+    )
+    builder.add_node("intake", intake_node)
     builder.add_node("plan", plan)
     builder.add_node("gather", gather)
     builder.add_node("analyze", analyze)
@@ -33,7 +42,11 @@ def build_graph() -> StateGraph:
     builder.add_node("report", report)
 
     builder.add_edge(START, "intake")
-    builder.add_edge("intake", "plan")
+    builder.add_conditional_edges(
+        "intake",
+        route_after_intake,
+        {"end": END, "plan": "plan"},
+    )
     builder.add_edge("plan", "gather")
     builder.add_edge("gather", "analyze")
     builder.add_edge("analyze", "draft")

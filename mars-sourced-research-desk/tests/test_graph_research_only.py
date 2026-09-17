@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from desk_helpers import assistant_summary
 from sourced_research_desk.graph import compile_graph
 
 
@@ -55,9 +56,7 @@ def test_research_only_produces_brief_without_interrupt(monkeypatch):
         assert c.get("date"), "claim missing date"
     assert result.get("status") in {"ok", "empty"}
     assert result.get("sent") is not True
-    assert "not sent" in (result.get("human_summary") or "").lower() or result.get(
-        "outbound"
-    ) == "none"
+    assert "not sent" in assistant_summary(result).lower() or result.get("outbound") == "none"
 
 
 def test_claims_map_into_brief_citations(monkeypatch):

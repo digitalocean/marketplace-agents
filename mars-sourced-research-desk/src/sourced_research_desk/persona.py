@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Callable
 
 _HARD_RULES = """Hard rules (all modes):
 - Public web only (http/https). Never scrape behind login or invent sources.
@@ -103,6 +104,112 @@ def ask_body(
         f"Conflicts flagged: {conflicts_n}\n\n"
         "This will post/send the draft above. It will not edit the brief further.\n\n"
         "v1 note: Approve stubs send in run state; no real Slack/email yet."
+    )
+
+
+WELCOME_STARTERS = [
+    "Research: What changed in public-web tooling this quarter?",
+    "Research: Compare two vendors on pricing pages (add seed URLs if you have them).",
+    "Help: what do you do?",
+]
+
+
+def welcome_message() -> str:
+    """Greeting for chat intent (hi / empty opener)."""
+    starters = "\n".join(f"• {s}" for s in WELCOME_STARTERS)
+    return (
+        "I'm Sourced Research Desk, a research colleague for operators.\n\n"
+        "I plan public-web research, gather sources, extract dated claims, and draft "
+        "a brief you can copy or stub-send after your OK.\n\n"
+        "I will not send Slack or email without your approval on this run. "
+        "v1 outbound is stubbed: Approve records intent only.\n\n"
+        f"Try one of these:\n{starters}\n\n"
+        "Or ask what I can do."
+    )
+
+
+def help_message() -> str:
+    """Full help / how-to reply."""
+    return (
+        "Here's how I work:\n\n"
+        "1. You give a research question (and optional seed URLs or fixtures offline).\n"
+        "2. I plan subquestions and queries, then fetch public http/https pages.\n"
+        "3. I extract claims with url and date. Every bullet maps to a source.\n"
+        "4. I draft a markdown brief (Findings, Conflicts, Citations).\n"
+        "5. If outbound is Slack or email, I ask before any stub send.\n\n"
+        "I do not: scrape behind login, invent citations, or auto-send in v1.\n\n"
+        "Offline tests use fixture_sources. Live fetch needs a harness inference key.\n\n"
+        "Say a question to start research, or ask about sources, outbound, or approve/deny."
+    )
+
+
+def help_sources() -> str:
+    return (
+        "Every factual bullet must map to a claim with url and date.\n\n"
+        "Public http/https only. If a page fails, I say so and I do not invent content.\n"
+        "Offline runs can pass fixture_sources with claim, quote, and published_date."
+    )
+
+
+def help_outbound() -> str:
+    return (
+        "Outbound is optional: none (brief stays in run artifacts), slack, or email.\n\n"
+        "When outbound is set and the brief is sourced, I pause and ask before send.\n"
+        "Approve stubs send in run state (message_id prefix stub-). Deny keeps the brief local.\n"
+        "v1 does not post to real Slack or email."
+    )
+
+
+def help_approve_deny() -> str:
+    return (
+        "When outbound is on and the brief is ready, I pause and ask.\n\n"
+        "• Approve: record stub send intent in this run.\n"
+        "• Deny: keep the brief; send nothing.\n\n"
+        "Neither path edits the brief further after the ask."
+    )
+
+
+_TOPIC_PATTERNS: list[tuple[re.Pattern[str], Callable[[], str]]] = [
+    (
+        re.compile(r"\b(sources?|citations?|claims?|evidence|urls?)\b", re.I),
+        help_sources,
+    ),
+    (
+        re.compile(r"\b(outbound|slack|email|send|export)\b", re.I),
+        help_outbound,
+    ),
+    (
+        re.compile(r"\b(approve|deny)\b", re.I),
+        help_approve_deny,
+    ),
+]
+
+
+def help_for_topic(human_text: str) -> str:
+    text = (human_text or "").strip()
+    if not text:
+        return help_message()
+
+    generic = re.search(
+        r"\b(what\s+do\s+you\s+do|how\s+does\s+(?:this|it)\s+work|what\s+can\s+you\s+do|"
+        r"help(?:\s+me)?|getting\s+started|capabilities)\b",
+        text,
+        re.I,
+    )
+    if generic and not re.search(
+        r"\b(sources?|citations?|outbound|approve|deny)\b", text, re.I
+    ):
+        return help_message()
+    for pattern, builder in _TOPIC_PATTERNS:
+        if pattern.search(text):
+            return builder()
+    return help_message()
+
+
+def other_message() -> str:
+    return (
+        "Didn't quite catch that. Want to start research or see a quick how-to?\n\n"
+        "Ask a research question, or say help."
     )
 
 
