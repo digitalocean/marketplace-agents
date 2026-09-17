@@ -9,7 +9,6 @@ _CHAT_RE = re.compile(
     r"hi|hello|hey|yo|sup|howdy|hiya|"
     r"good\s+(?:morning|afternoon|evening)|"
     r"what'?s\s+up|whats\s+up|"
-    r"run|go|start|"
     r"please|thanks|thank\s+you|thx|cheers|nice|cool|"
     r"lol|haha|ha|"
     r"bye|goodbye|see\s+ya|later"
