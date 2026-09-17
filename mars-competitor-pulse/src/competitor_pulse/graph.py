@@ -26,10 +26,9 @@ def build_graph() -> StateGraph:
     plan→draft without streaming raw ``watchlist`` JSON. Only ``report``
     appends chat ``messages``.
 
-    ``input_schema`` omits ``watchlist`` so Agent Server / doctl do not seed
-    ``{"watchlist":[]}`` into prompt ``text``. ``output_schema`` exposes
-    ``messages`` (not ``human_summary``) so doctl does not duplicate greeting
-    bubbles when concatenating stream updates.
+    ``watchlist`` lives under ``internal`` (not in input/output schemas) so
+    doctl never seeds ``{"watchlist":[]}``. Chat/help ``converse`` ends at END
+    with a single ``AIMessage`` — pulse paths still finish at ``report``.
     """
     builder: StateGraph = StateGraph(
         PulseState,
@@ -49,7 +48,7 @@ def build_graph() -> StateGraph:
         route_after_intake,
         {"converse": "converse", "execute_pulse": "execute_pulse", "report": "report"},
     )
-    builder.add_edge("converse", "report")
+    builder.add_edge("converse", END)
     builder.add_conditional_edges(
         "execute_pulse",
         should_ask,

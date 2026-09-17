@@ -51,7 +51,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 Competitor Pulse has a sharp, dry GTM-researcher personality in MARS chat — helpful, not corporate. Greetings and how-to questions get a single warm reply; pulse work stays factual.
 
-The graph speaks through a single final `AIMessage` from the `report` node. `input_schema` exposes only chat-safe fields (no `watchlist`, so doctl never prefixes `{"watchlist":[]}`); `output_schema` exposes `messages` (not `human_summary`, so stream concat does not duplicate greetings). Intent routing runs in `intake`; plan→draft run inside `execute_pulse` so MARS stream updates never include raw `watchlist` JSON. Never raw JSON or HTML source in chat bubbles.
+The graph speaks through a single `AIMessage`: chat/help paths end at `converse`; pulse paths finish at `report`. `watchlist` is nested under internal graph state (not in input/output schemas), so doctl never prefixes `{"watchlist":[]}`. Stream updates omit prose-only fields (`converse_reply`, `human_summary`) so doctl concat does not duplicate greetings. Never raw JSON or HTML source in chat bubbles.
 
 | Situation | What you see |
 |-----------|----------------|
@@ -75,7 +75,7 @@ The graph speaks through a single final `AIMessage` from the `report` node. `inp
 ## Run flow
 
 ```
-intake → (chat/help → converse → report | pulse → execute_pulse → **ask** → act → report | blocked → report)
+intake → (chat/help → converse → END | pulse → execute_pulse → **ask** → act → report | blocked → report)
 ```
 
 `execute_pulse` runs plan → gather → analyze → draft internally.

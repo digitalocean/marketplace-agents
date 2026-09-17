@@ -134,6 +134,8 @@ def test_stream_updates_never_include_watchlist(monkeypatch):
     ):
         for _node, update in chunk.items():
             assert "watchlist" not in (update or {})
+            assert "internal" not in (update or {})
+            assert "converse_reply" not in (update or {})
             if update and update.get("messages"):
                 for msg in update["messages"]:
                     if isinstance(msg, AIMessage):
@@ -154,6 +156,8 @@ def test_hi_stream_has_no_watchlist_or_duplicate_messages(monkeypatch):
     ):
         for _node, update in chunk.items():
             assert "watchlist" not in (update or {})
+            assert "internal" not in (update or {})
+            assert "converse_reply" not in (update or {})
             if update and update.get("messages"):
                 ai_count += sum(
                     1 for msg in update["messages"] if isinstance(msg, AIMessage)

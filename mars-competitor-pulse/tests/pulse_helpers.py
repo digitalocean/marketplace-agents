@@ -8,6 +8,7 @@ from competitor_pulse.mars_text import (
     last_assistant_text,
     prepare_programmatic_payload,
     summary_from_assistant_text,
+    watchlist_from_state,
 )
 from competitor_pulse.pulse_diff import default_watchlist
 
