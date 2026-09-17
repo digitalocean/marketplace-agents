@@ -16,6 +16,8 @@ from competitor_pulse.chat import (
     looks_like_watchlist_json,
     parse_track_message,
 )
+from competitor_pulse.converse import conversational_reply
+from competitor_pulse.intent import classify_intent
 from competitor_pulse.intake_parse import parse_notify_from_message, parse_watchlist_from_message
 from competitor_pulse.pulse_diff import (
     allow_network,
@@ -191,7 +193,7 @@ def _resolve_watchlist(
             ),
         }
 
-    if parsed.get("is_generic") or not human_text.strip():
+    if not human_text.strip():
         return {
             "watchlist": default_watchlist(),
             "from_nl": False,
@@ -199,7 +201,7 @@ def _resolve_watchlist(
         }
 
     return {
-        "watchlist": default_watchlist(),
+        "watchlist": [],
         "from_nl": False,
         "blocked": False,
     }
@@ -244,6 +246,35 @@ def intake(state: PulseState) -> dict[str, Any]:
     intake_json = _parse_intake_json(human_text) if human_text else None
     overlay = _apply_intake_overlay(state, intake_json or {})
     nl_text = "" if looks_like_watchlist_json(human_text) else human_text
+
+    parsed_nl = parse_watchlist_from_message(nl_text) if nl_text else {}
+    intent = classify_intent(
+        nl_text,
+        state_watchlist=list(state.get("watchlist") or []),
+        overlay_watchlist=(
+            overlay.get("watchlist")
+            if isinstance(overlay.get("watchlist"), list)
+            else None
+        ),
+        overlay_preset=overlay.get("preset"),
+        parsed_nl=parsed_nl,
+    )
+
+    if intent in {"chat", "help", "other"}:
+        return {
+            "intent": intent,
+            "status": intent,
+            "watchlist": [],
+            "notify": False,
+            "human_summary": "",
+            "stage_summaries": _append_summary(
+                state, f"intake: {intent} — conversational"
+            ),
+            "deltas": [],
+            "material": False,
+            "skipped": False,
+            "notified": False,
+        }
 
     resolved = _resolve_watchlist(state, overlay, nl_text)
     watchlist = list(resolved.get("watchlist") or [])
@@ -305,6 +336,7 @@ def intake(state: PulseState) -> dict[str, Any]:
         watchlist, allow_net=allow_net, from_chat=from_chat
     )
     return {
+        "intent": "pulse",
         "watchlist": watchlist,
         "notify": notify,
         "channel": channel,
@@ -644,6 +676,33 @@ def draft(state: PulseState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def route_after_intake(state: PulseState) -> str:
+    """Conversational intents skip gather; pulse continues to plan."""
+    intent = (state.get("intent") or "pulse").strip().lower()
+    if intent in {"chat", "help", "other"}:
+        return "converse"
+    if state.get("status") == "blocked":
+        return "report"
+    return "plan"
+
+
+def converse(state: PulseState) -> dict[str, Any]:
+    """Single warm reply for chat / help / ambiguous — no fetch or deltas."""
+    intent = (state.get("intent") or "chat").strip().lower()
+    human_text = _human_message_text(state.get("messages"))
+    if not human_text.strip():
+        human_text = (state.get("user_message") or "").strip()
+    reply = conversational_reply(intent, human_text)
+    return {
+        "human_summary": reply,
+        "status": intent,
+        "material": False,
+        "deltas": [],
+        "delta_count": 0,
+        "stage_summaries": _append_summary(state, f"converse: {intent}"),
+    }
+
+
 def should_ask(state: PulseState) -> str:
     """Ask only if notify requested AND material == true."""
     if state.get("status") in {"blocked", "empty", "error", "baseline"}:
@@ -803,8 +862,12 @@ def report(state: PulseState) -> dict[str, Any]:
     material = bool(state.get("material"))
     watch_n = len(state.get("watchlist") or [])
 
-    if status == "blocked":
-        summary = (
+    if status in {"chat", "help", "other"}:
+        summary = state.get("human_summary") or ""
+        next_hint = "Name companies to track or ask how this works."
+        out_status = status
+    elif status == "blocked":
+        summary = state.get("human_summary") or (
             "Could not complete the pulse — fetch/tools were unavailable.\n"
             f"Watchlist had {watch_n} competitor(s). Fix network/fixtures and retry."
         )

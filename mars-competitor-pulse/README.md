@@ -14,7 +14,8 @@ Start a chat and name the companies you want to track in plain English — no JS
 | `Pulse on Cursor and Perplexity` | Tracks Cursor and Perplexity |
 | `Track Cursor and alert on Slack` | Tracks Cursor; sets `notify=true` for the approval gate |
 | `track fedex` | Sets up a watch on FedEx with best-effort public URLs (LLM when inference is configured) |
-| `hi` or `run` | Uses the Acme/BetaCo fixture watchlist (smoke / backward-compat) |
+| `hi` or `thanks` | Conversational greeting — invites you to name companies (no fixture pulse) |
+| `what do you do?` / `how does this work?` | In-character help on tracking, baselines, notify, and v1 limits |
 
 **How intake works**
 
@@ -23,7 +24,8 @@ Start a chat and name the companies you want to track in plain English — no JS
    - **Known aliases** (OpenAI, Anthropic, Google/Gemini/DeepMind, Perplexity, Microsoft Copilot, xAI/Grok, Cursor, Meta/Llama, Mistral, Cohere, Amazon Bedrock/Q, Apple Intelligence, …) resolve **offline** to a watchlist with public HTTPS URLs.
    - With **harness inference** configured (`HARNESS_INFERENCE_API_KEY` or `OPENAI_API_KEY`), an LLM pass can extract less common company names and best-effort URLs.
    - An **explicit tracking request** that names no resolvable companies (e.g. `Track FooBar and BazQuux`) returns **blocked** with a prompt to name specific competitors — it does **not** silently fall back to Acme fixtures.
-   - **Generic or empty** messages (`hi`, `run`, no companies) still use the fixture watchlist for smoke and tests.
+   - **Chat / help** (`hi`, `thanks`, `what do you do?`, `how does this work?`) get a warm, personality-forward reply — no URL fetch, no Acme fixture fallback.
+   - **Programmatic invoke** with no chat text (empty `messages`) still uses the fixture watchlist for smoke and tests.
    - **Raw JSON** payloads are parsed silently — they never appear as assistant chat text.
 
 **Defaults from chat**
@@ -47,10 +49,13 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 ## Chat tone (operator-facing)
 
+Competitor Pulse has a sharp, dry GTM-researcher personality in MARS chat — helpful, not corporate. Greetings and how-to questions get a single warm reply; pulse work stays factual.
+
 The graph speaks through `human_summary` and a final `AIMessage` — never raw JSON or HTML source.
 
 | Situation | What you see |
 |-----------|----------------|
+| `hi` / `what do you do?` | Short conversational reply — no pulse run |
 | `track fedex` (first time) | Short ack + **First look — baseline established** with human page summaries |
 | Quiet re-run | **No changes** since last pulse |
 | Material diff | What moved + optional counterposition one-liners |
@@ -70,7 +75,7 @@ The graph speaks through `human_summary` and a final `AIMessage` — never raw J
 ## Run flow
 
 ```
-intake → plan → gather → analyze → draft → **ask** → act → report
+intake → (chat/help → converse → report | pulse → plan → gather → analyze → draft → **ask** → act → report)
 ```
 
 **Ask is skipped** on first-baseline capture, when the diff is empty / non-material (`status: empty`), when `notify` is false (default), or when intake is blocked.
@@ -166,7 +171,7 @@ Track Cursor and alert on Slack
 }
 ```
 
-**Fixture path (no chat)** — empty or generic input uses Acme/BetaCo fixtures:
+**Fixture path (no chat)** — programmatic invoke without chat text uses Acme/BetaCo fixtures:
 
 ```bash
 ALLOW_NET=0 python scripts/smoke_invoke.py

@@ -20,6 +20,7 @@ class PulseState(TypedDict, total=False):
     # Chat / intake (tests and legacy invoke)
     user_message: str
     chat_ack: str
+    intent: str  # chat | help | pulse | other
 
     # Intake
     watchlist: list[dict[str, Any]]
