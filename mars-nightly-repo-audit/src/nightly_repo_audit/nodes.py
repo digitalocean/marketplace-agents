@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nightly_repo_audit.hygiene import hygiene_text
+from nightly_repo_audit.persona import ask_body, ask_title
 from nightly_repo_audit.repo_scan import default_fixture_path, scan_repo
 from nightly_repo_audit.state import AuditState
 
@@ -273,7 +275,7 @@ def draft(state: AuditState) -> dict[str, Any]:
             "",
         ]
     )
-    pr_body_md = "\n".join(body_lines)
+    pr_body_md = hygiene_text("\n".join(body_lines))
     commit_message = f"chore: nightly cleanup in {area} ({n} findings)"
 
     preview = "\n".join(f"- {b}" for b in patch_summary[:5])
@@ -324,21 +326,18 @@ def ask(state: AuditState) -> dict[str, Any]:
     patch_summary = list(state.get("patch_summary") or [])
     bullets = "\n".join(f"- {b}" for b in patch_summary[:5]) or "- (none)"
 
-    body = (
-        f"Open a draft PR on {repo}?\n\n"
-        f"Branch:  {branch}\n"
-        f"Title:   {pr_title}\n"
-        f"Scope:   {area}\n"
-        f"Changes: {diff_stat}\n\n"
-        f"What it does:\n{bullets}\n\n"
-        "What it will not do:\n"
-        "- Merge\n"
-        f"- Touch paths outside {area}\n"
-        "- Change product behavior (cleanup / hygiene only)\n\n"
-        "Evidence: findings + diff are in this run's artifacts."
+    body = hygiene_text(
+        ask_body(
+            repo=repo,
+            branch=branch,
+            pr_title=pr_title,
+            area=area,
+            diff_stat=diff_stat,
+            bullets=bullets,
+        )
     )
     payload = {
-        "title": "Open cleanup PR?",
+        "title": ask_title(repo=repo),
         "body": body,
         "pending_action": "open_pr",
         "choices": ["approve", "deny"],
@@ -454,7 +453,7 @@ def report(state: AuditState) -> dict[str, Any]:
     ]
 
     return {
-        "human_summary": summary,
+        "human_summary": hygiene_text(summary),
         "status": status,
         "artifacts": artifacts,
         "next_hint": next_hint,
