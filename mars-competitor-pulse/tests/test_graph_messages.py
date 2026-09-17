@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage
+import json
+import re
+
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+from competitor_pulse.chat import contains_watchlist_json
 from competitor_pulse.graph import compile_graph
 from competitor_pulse.pulse_diff import (
     default_baseline_path,
@@ -14,6 +18,8 @@ from competitor_pulse.pulse_diff import (
     quiet_baseline_path,
 )
 
+_WATCHLIST_JSON_RE = re.compile(r'\{\s*"watchlist"\s*:', re.IGNORECASE)
+
 
 def _offline(monkeypatch):
     monkeypatch.delenv("HARNESS_INFERENCE_API_KEY", raising=False)
@@ -21,12 +27,14 @@ def _offline(monkeypatch):
     monkeypatch.setenv("ALLOW_NET", "0")
 
 
+def _ai_messages(result: dict) -> list[AIMessage]:
+    return [m for m in (result.get("messages") or []) if isinstance(m, AIMessage)]
+
+
 def _last_ai_message(result: dict) -> AIMessage:
-    msgs = result.get("messages") or []
-    assert msgs, "expected at least one message in final state"
-    last = msgs[-1]
-    assert isinstance(last, AIMessage)
-    return last
+    msgs = _ai_messages(result)
+    assert msgs, "expected at least one assistant message in final state"
+    return msgs[-1]
 
 
 def test_quiet_run_emits_assistant_message(monkeypatch):
@@ -84,3 +92,66 @@ def test_resume_approve_emits_assistant_message(monkeypatch):
     assert final.get("status") == "notified"
     assert "notify sent" in ai.content.lower()
     assert final.get("brief_md") in ai.content
+
+
+def test_hi_chat_emits_exactly_one_assistant_message(monkeypatch):
+    """Greeting path must not duplicate intake ack + report in messages[]."""
+    _offline(monkeypatch)
+    g = compile_graph()
+    result = g.invoke(
+        {
+            "messages": [HumanMessage(content="hi")],
+            "allow_net": False,
+        }
+    )
+    assert len(_ai_messages(result)) == 1
+    ai = _last_ai_message(result)
+    assert isinstance(ai.content, str)
+    assert not contains_watchlist_json(ai.content)
+
+
+def test_no_assistant_message_contains_watchlist_json(monkeypatch):
+    """Chat bubbles must never include raw watchlist JSON."""
+    _offline(monkeypatch)
+    g = compile_graph()
+    cases = [
+        {"messages": [HumanMessage(content="hi")], "allow_net": False},
+        {"messages": [HumanMessage(content="track fedex")], "allow_net": False},
+        {
+            "watchlist": default_watchlist(),
+            "notify": False,
+            "baseline_path": str(material_baseline_path()),
+            "allow_net": False,
+        },
+    ]
+    for payload in cases:
+        result = g.invoke(payload)
+        for ai in _ai_messages(result):
+            content = ai.content if isinstance(ai.content, str) else str(ai.content)
+            assert not _WATCHLIST_JSON_RE.search(content)
+            assert not contains_watchlist_json(content)
+
+
+def test_stream_updates_never_include_watchlist(monkeypatch):
+    """MARS streams node updates — execute_pulse must not emit watchlist JSON."""
+    _offline(monkeypatch)
+    g = compile_graph()
+    for chunk in g.stream(
+        {"messages": [HumanMessage(content="track fedex")], "allow_net": False},
+        stream_mode="updates",
+    ):
+        for _node, update in chunk.items():
+            assert "watchlist" not in (update or {})
+            if update and update.get("messages"):
+                for msg in update["messages"]:
+                    if isinstance(msg, AIMessage):
+                        content = msg.content if isinstance(msg.content, str) else str(
+                            msg.content
+                        )
+                        assert not contains_watchlist_json(content)
+
+
+def test_graph_compile_name(monkeypatch):
+    _offline(monkeypatch)
+    g = compile_graph()
+    assert g.name == "Competitor Pulse"

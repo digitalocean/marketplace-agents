@@ -47,7 +47,7 @@ Start a chat and name the companies you want to track in plain English — no JS
 
 ## Chat tone (operator-facing)
 
-The graph speaks through `human_summary` and a final `AIMessage` — never raw JSON or HTML source.
+The graph speaks through a single final `AIMessage` from the `report` node (plus `human_summary` for run artifacts). Intake→draft run inside one `execute_pulse` node so MARS stream updates never include raw `watchlist` JSON. Never raw JSON or HTML source in chat bubbles.
 
 | Situation | What you see |
 |-----------|----------------|
@@ -70,12 +70,27 @@ The graph speaks through `human_summary` and a final `AIMessage` — never raw J
 ## Run flow
 
 ```
-intake → plan → gather → analyze → draft → **ask** → act → report
+execute_pulse (intake → plan → gather → analyze → draft) → **ask** → act → report
 ```
 
 **Ask is skipped** on first-baseline capture, when the diff is empty / non-material (`status: empty`), when `notify` is false (default), or when intake is blocked.
 
-Intermediate stages update `stage_summaries` only — the operator sees intake ack (optional) plus the final `report` message.
+Only `report` appends to `messages[]`. Earlier stages update `stage_summaries` only.
+
+### MARS chat UI sender label
+
+The DO MARS session UI labels assistant bubbles **LangGraph** when the agent spec uses `agent: langgraph` / `template: langgraph` (see `specs/mars-competitor-pulse.yaml`). That label is **not** controlled by this repo's graph code.
+
+What we set from the repo (for any platform that reads it):
+
+| Lever | Value |
+|-------|-------|
+| `compile(name=…)` | `Competitor Pulse` |
+| `langgraph.json` → `graphs.agent.description` | Competitor Pulse tagline |
+| `AIMessage.name` on the final reply | `Competitor Pulse` |
+| MARS spec `name:` | `mars-competitor-pulse` / `competitor-pulse` |
+
+If the MARS UI chip still reads **LangGraph** after deploy, that is a platform/template default — not something we can override honestly from agent source alone. Assistant display names on LangGraph Agent Server are normally set via the Assistants API (`name` / `description`), which MARS manages outside this repo.
 
 ## Human approval
 

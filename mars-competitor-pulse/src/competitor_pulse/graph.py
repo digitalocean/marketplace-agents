@@ -8,12 +8,8 @@ from langgraph.graph import END, START, StateGraph
 
 from competitor_pulse.nodes import (
     act,
-    analyze,
     ask,
-    draft,
-    gather,
-    intake,
-    plan,
+    execute_pulse,
     report,
     should_ask,
 )
@@ -21,24 +17,20 @@ from competitor_pulse.state import PulseState
 
 
 def build_graph() -> StateGraph:
-    """Construct the uncompiled StateGraph."""
+    """Construct the uncompiled StateGraph.
+
+    intake→draft run inside ``execute_pulse`` so MARS stream updates never
+    include raw ``watchlist`` JSON. Only ``report`` appends chat messages.
+    """
     builder: StateGraph = StateGraph(PulseState)
-    builder.add_node("intake", intake)
-    builder.add_node("plan", plan)
-    builder.add_node("gather", gather)
-    builder.add_node("analyze", analyze)
-    builder.add_node("draft", draft)
+    builder.add_node("execute_pulse", execute_pulse)
     builder.add_node("ask", ask)
     builder.add_node("act", act)
     builder.add_node("report", report)
 
-    builder.add_edge(START, "intake")
-    builder.add_edge("intake", "plan")
-    builder.add_edge("plan", "gather")
-    builder.add_edge("gather", "analyze")
-    builder.add_edge("analyze", "draft")
+    builder.add_edge(START, "execute_pulse")
     builder.add_conditional_edges(
-        "draft",
+        "execute_pulse",
         should_ask,
         {"ask": "ask", "report": "report"},
     )
@@ -51,7 +43,7 @@ def build_graph() -> StateGraph:
 def compile_graph(checkpointer: Any = None):
     """Compile with optional checkpointer (required for interrupt resume locally)."""
     builder = build_graph()
-    kwargs: dict[str, Any] = {"name": "CompetitorPulse"}
+    kwargs: dict[str, Any] = {"name": "Competitor Pulse"}
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
     return builder.compile(**kwargs)
