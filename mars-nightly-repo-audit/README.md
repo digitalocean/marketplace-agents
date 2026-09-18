@@ -87,8 +87,8 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 **Permissions / tools**
 
 - Fixture scan uses in-repo `fixtures/sample_repo/` (deterministic filesystem scan)
-- `tools: [do.actions]` in the agent spec; platform injects `HARNESS_MCP_SERVERS` (JSON, sometimes base64) with the `do_actions` VPC MCP URL
-- `permissions.allow` must include `do.actions.github.create_pull_request` (or the discovered PR-create tool id); `default: ask` alone blocks in-band gateway MCP calls
+- Spec toolbelt: `tools: [do.actions: [do.actions.github.create_pull_request]]` (Nix catalog may refine the id); platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with the `do_actions` VPC MCP URL — graph binds MCP at runtime
+- `permissions.allow` must list the same PR-create tool id; `default: ask` alone blocks in-band gateway MCP calls
 - Approve opens a real **draft** PR via Action Gateway when a GitHub Connection is available; Deny never opens
 - Optional live LLM planning when harness key present (offline path needs no key)
 

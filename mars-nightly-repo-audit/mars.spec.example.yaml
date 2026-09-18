@@ -16,13 +16,16 @@ env:
 secrets:
   HARNESS_INFERENCE_API_KEY: "<your-do-api-key>"
 
-# Action Gateway — platform injects HARNESS_MCP_SERVERS (JSON, sometimes base64)
-# with the do_actions VPC MCP URL when do.actions is enabled.
+# Action Gateway — platform injects HARNESS_MCP_SERVERS (base64 JSON array) with
+# do_actions VPC URL, e.g. [{"name":"do_actions","url":"http://trusted-actions.../mcp/session/<id>"}]
+# Graph binds MCP client at runtime (not auto-wired by LangGraph Agent Server).
 tools:
-  - do.actions
+  # Narrow toolbelt: GitHub draft PR open only. Nix catalog may refine the id below.
+  - do.actions:
+      - do.actions.github.create_pull_request
 
 permissions:
   default: ask
-  # default: ask blocks in-band gateway MCP calls; allow the PR-create tool explicitly.
+  # default: ask blocks in-band gateway MCP calls; allow required MCP tools explicitly.
   allow:
     - do.actions.github.create_pull_request

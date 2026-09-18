@@ -20,9 +20,32 @@ if str(SRC) not in sys.path:
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
+from nightly_repo_audit.action_gateway import set_mcp_client_factory  # noqa: E402
 from nightly_repo_audit.graph import compile_graph  # noqa: E402
 from nightly_repo_audit.llm import harness_env_available, resolve_llm_env  # noqa: E402
 from nightly_repo_audit.repo_scan import default_fixture_path  # noqa: E402
+
+
+class _SmokeApproveMcpClient:
+    def list_tools(self):
+        return [{"name": "do.actions.github.create_pull_request"}]
+
+    def call_tool(self, name, arguments):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "html_url": (
+                                "https://github.com/local/sample/pull/1"
+                            ),
+                            "number": 1,
+                        }
+                    ),
+                }
+            ]
+        }
 
 
 def main() -> int:
@@ -106,6 +129,36 @@ def main() -> int:
     if final.get("status") != "denied" or final.get("pr_url"):
         print("SMOKE FAIL: deny should yield denied + no pr_url", file=sys.stderr)
         return 1
+
+    # 3) Findings → ask → approve with mocked Action Gateway (offline)
+    os.environ.setdefault("ALLOW_NET", "0")
+    os.environ["HARNESS_MCP_SERVERS"] = json.dumps(
+        [{"name": "do_actions", "url": "https://ag.smoke.example/mcp"}]
+    )
+    set_mcp_client_factory(lambda _cfg: _SmokeApproveMcpClient())  # noqa: ARG005
+    g2 = compile_graph(checkpointer=MemorySaver())
+    cfg2 = {"configurable": {"thread_id": "smoke-nightly-approve"}}
+    mid2 = g2.invoke(
+        {
+            "repo": "local/sample",
+            "ref": "main",
+            "trigger": "manual",
+            "area_hint": "src",
+            "fixture_path": fixture,
+        },
+        cfg2,
+    )
+    print("\n--- approve path (mock AG) ---")
+    if "__interrupt__" not in mid2:
+        print("SMOKE FAIL: expected ask before approve", file=sys.stderr)
+        return 1
+    approved = g2.invoke(Command(resume="approve"), cfg2)
+    print("status:", approved.get("status"))
+    print("pr_url:", approved.get("pr_url"))
+    if approved.get("status") != "opened" or not approved.get("pr_url"):
+        print("SMOKE FAIL: approve should open draft PR via mocked AG", file=sys.stderr)
+        return 1
+    set_mcp_client_factory(None)
 
     print("\nSMOKE OK")
     return 0

@@ -13,9 +13,12 @@ from typing import Any, Callable
 
 DO_ACTIONS_SERVER_NAME = "do_actions"
 
-# Preferred tool ids (narrowest first). Runtime discovery falls back to tools/list.
+# Spec toolbelt + permissions.allow (Nix AG catalog discovery may refine).
+# Graph also resolves via tools/list at runtime when catalog ids differ.
+GITHUB_CREATE_PR_TOOL_ID = "do.actions.github.create_pull_request"
+
 PREFERRED_CREATE_PR_TOOL_IDS = (
-    "do.actions.github.create_pull_request",
+    GITHUB_CREATE_PR_TOOL_ID,
     "github.create_pull_request",
     "create_pull_request",
 )
@@ -105,6 +108,13 @@ class McpHttpClient:
                 "capabilities": {},
                 "clientInfo": {"name": "nightly-repo-audit", "version": "0.1.0"},
             },
+        )
+        # MCP lifecycle: acknowledge initialize before tools/list or tools/call.
+        self._post(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            }
         )
         self._initialized = True
 

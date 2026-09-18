@@ -62,6 +62,27 @@ def test_decode_plain_and_base64_harness_mcp_servers():
     assert decode_harness_mcp_servers_raw(encoded) == plain
 
 
+def test_parse_spike_shaped_harness_mcp_servers():
+    """Match AG spike: name + url only (no transport field), VPC session URL."""
+    raw = json.dumps(
+        [
+            {
+                "name": "do_actions",
+                "url": (
+                    "http://trusted-actions.vpc-endpoint.internal.digitalocean.com"
+                    "/mcp/session/01a0b4a9-0de8-7dd9-a691-6da8dca6ee2f"
+                ),
+            }
+        ]
+    )
+    encoded = base64.b64encode(raw.encode()).decode()
+    configs = parse_harness_mcp_servers(encoded)
+    assert len(configs) == 1
+    assert configs[0].name == "do_actions"
+    assert configs[0].transport == "http"
+    assert "trusted-actions.vpc-endpoint" in configs[0].url
+
+
 def test_parse_harness_mcp_servers_do_actions():
     raw = json.dumps(
         [
