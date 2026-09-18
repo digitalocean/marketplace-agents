@@ -16,5 +16,13 @@ env:
 secrets:
   HARNESS_INFERENCE_API_KEY: "<your-do-api-key>"
 
+# Action Gateway — platform injects HARNESS_MCP_SERVERS (JSON, sometimes base64)
+# with the do_actions VPC MCP URL when do.actions is enabled.
+tools:
+  - do.actions
+
 permissions:
   default: ask
+  # default: ask blocks in-band gateway MCP calls; allow the PR-create tool explicitly.
+  allow:
+    - do.actions.github.create_pull_request

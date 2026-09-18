@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from nightly_repo_audit.converse import conversational_reply
 from nightly_repo_audit.hygiene import hygiene_text
 from nightly_repo_audit.intent import classify_intent
+from nightly_repo_audit.action_gateway import open_draft_pr
 from nightly_repo_audit.persona import (
     approve_open_message,
     ask_body,
@@ -17,6 +18,7 @@ from nightly_repo_audit.persona import (
     blocked_checkout_message,
     deny_open_message,
     empty_message,
+    open_pr_failed_message,
     plan_confirm_body,
     plan_confirm_title,
     plan_confirmed_message,
@@ -515,7 +517,7 @@ def should_ask(state: AuditState) -> str:
 
 
 def ask(state: AuditState) -> dict[str, Any]:
-    """Interrupt for human approval before open_pr stub."""
+    """Interrupt for human approval before open_pr via Action Gateway."""
     from langgraph.types import interrupt
 
     repo = state.get("repo") or "local/sample"
@@ -562,24 +564,40 @@ def act(state: AuditState) -> dict[str, Any]:
             "pr_url": "",
             "human_summary": deny_open_message(),
             "stage_summaries": _append_summary(state, "act: denied — no PR"),
-            # Clear any accidental PR metadata
             "pr_number": 0,
         }
 
-    # Stub open_pr — record metadata in state only (no real GitHub)
-    pr_number = 9001
-    pr_url = f"https://example.com/{state.get('repo') or 'local/sample'}/pull/{pr_number}"
     pr_title = state.get("pr_title") or ""
+    result = open_draft_pr(
+        repo=state.get("repo") or "",
+        ref=state.get("ref") or "main",
+        branch=state.get("branch_name") or "",
+        title=pr_title,
+        body=state.get("pr_body_md") or "",
+    )
+    if not result.ok:
+        msg = open_pr_failed_message(result.error_message)
+        return {
+            "skipped": True,
+            "status": "error",
+            "pr_url": "",
+            "pr_number": 0,
+            "human_summary": msg,
+            "stage_summaries": _append_summary(state, "act: open failed"),
+            **_assistant_reply(msg),
+        }
+
     return {
         "skipped": False,
         "status": "opened",
-        "pr_number": pr_number,
-        "pr_url": pr_url,
+        "pr_number": result.pr_number,
+        "pr_url": result.pr_url,
         "pr_title": pr_title,
         "pr_body_md": state.get("pr_body_md") or "",
-        "human_summary": approve_open_message(pr_title),
+        "human_summary": approve_open_message(pr_title, result.pr_url),
         "stage_summaries": _append_summary(
-            state, f"act: stub opened PR #{pr_number}"
+            state,
+            f"act: opened PR #{result.pr_number or '?'} via {result.tool_name}",
         ),
     }
 
@@ -600,10 +618,18 @@ def report(state: AuditState) -> dict[str, Any]:
         next_hint = "Fix checkout path / tools and retry."
     elif status == "denied":
         summary = deny_open_message()
-        next_hint = "Artifacts kept; re-run and approve to open stub PR."
+        next_hint = "Artifacts kept; re-run and approve to open a draft PR."
+    elif status == "error":
+        summary = state.get("human_summary") or open_pr_failed_message(
+            "Could not open the PR."
+        )
+        next_hint = "Fix Action Gateway / GitHub Connection and retry."
     elif status == "opened":
-        summary = approve_open_message(state.get("pr_title") or "cleanup PR")
-        next_hint = "Review the stub PR metadata in run state."
+        summary = approve_open_message(
+            state.get("pr_title") or "cleanup PR",
+            state.get("pr_url") or "",
+        )
+        next_hint = "Review the draft PR on GitHub."
     else:
         summary = empty_message()
         next_hint = "Inspect stage_summaries for details."

@@ -11,5 +11,11 @@ env:
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
 secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+
+tools:
+  - do.actions
+
 permissions:
   default: ask
+  allow:
+    - do.actions.github.create_pull_request

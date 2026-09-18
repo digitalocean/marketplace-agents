@@ -9,12 +9,12 @@ Trigger → sandbox audit slice → one cleanup PR draft → ask before open. La
 - Drafts cleanup PR metadata (branch, title, body, diff_stat)
 - Stops for human approval before opening a PR
 
-## What it does not (v1)
+## What it does not
 
 - Auto-merge or force-push
-- Real GitHub `gh` / API open (act stubs PR metadata in state only)
 - Multi-repo fleet audits or product feature rewrites
 - Presenting Approve when findings are empty or checkout is blocked
+- Opening a PR without Action Gateway (`do.actions`) and a GitHub Connection wired
 
 ## Run flow
 
@@ -30,7 +30,7 @@ When the graph reaches **ask**, the run pauses until you **Open draft PR** (`app
 
 | If you… | Resume | The agent will… |
 |---------|--------|-----------------|
-| **Open draft PR** | `approve` | Stub-open PR metadata in state (`status: opened`, `pr_title` / `pr_body_md`; no real GitHub in v1) |
+| **Open draft PR** | `approve` | Open a real draft PR on GitHub via Action Gateway when `do.actions` + GitHub Connection are wired; otherwise fail closed with a clear message |
 | **Discard** | `deny` | Keep artifacts; skip the side effect; finish with status `denied` |
 
 You will see: **Open cleanup PR?** plus branch, title, scope, diff_stat, what-it-does bullets, what-it-will-not-do, and an evidence line.
@@ -86,8 +86,10 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 **Permissions / tools**
 
-- v1 operates on in-repo `fixtures/sample_repo/` (deterministic filesystem scan)
-- `open_pr` is stubbed — records intent in state only; no Action Gateway / `gh` required for local proof
+- Fixture scan uses in-repo `fixtures/sample_repo/` (deterministic filesystem scan)
+- `tools: [do.actions]` in the agent spec; platform injects `HARNESS_MCP_SERVERS` (JSON, sometimes base64) with the `do_actions` VPC MCP URL
+- `permissions.allow` must include `do.actions.github.create_pull_request` (or the discovered PR-create tool id); `default: ask` alone blocks in-band gateway MCP calls
+- Approve opens a real **draft** PR via Action Gateway when a GitHub Connection is available; Deny never opens
 - Optional live LLM planning when harness key present (offline path needs no key)
 
 ## Smoke
@@ -117,8 +119,9 @@ Expect:
 
 1. Stages through `draft` without side effects.
 2. An **ask** interrupt when findings exist; or a clean `empty` / `blocked` report with no ask.
-3. After Approve: stub PR evidence (`status: opened`, `pr_url` stub, `pr_title` / `pr_body_md`).
+3. After Approve (with mocked or live Action Gateway): `status: opened`, real `pr_url` / `pr_number`.
 4. After Deny: `status: denied` and no PR metadata.
+5. After Approve without Action Gateway: `status: error`, fail-closed prose.
 
 Local smoke (fixtures, no API key):
 

@@ -4,7 +4,7 @@
 
 **Job-to-be-done:** Trigger → plan one audit area → gather/scan → analyze findings → draft cleanup PR metadata → **ask before open**.
 
-**Why MARS / LangGraph:** Interrupt-gated LangGraph agent built for DigitalOcean MARS Harness Runtime. Draft by default: Approve opens (stubbed in v1), Deny discards the side effect and keeps artifacts. Same contract as the other top-3 agents — root `langgraph.json`, module-level `.compile()`, harness inference env.
+**Why MARS / LangGraph:** Interrupt-gated LangGraph agent built for DigitalOcean MARS Harness Runtime. Draft by default: Approve opens a real draft PR when Action Gateway and GitHub are wired; Deny discards the side effect and keeps artifacts. Same contract as the other top-3 agents — root `langgraph.json`, module-level `.compile()`, harness inference env.
 
 ---
 
@@ -18,13 +18,13 @@
 - Deterministic local path on in-repo `fixtures/sample_repo/` (no API key)
 - Harness-native LLM env with optional live planning when a key is present
 
-## What you don’t (v1 honesty)
+## What you don’t (honesty)
 
-- **No real GitHub PR open** — `act` stubs PR metadata in state (`status: opened`, stub `pr_url` / title / body); no `gh` / API
 - No auto-merge, force-push, or multi-repo fleet audits
 - No product-feature rewrites — hygiene / cleanup scope only
 - No Approve when findings are empty or the run is blocked
-- Action Gateway / live git checkout not required for local proof; v1 may keep gateway tools stubbed for first MARS proof
+- No PR open without Action Gateway (`do.actions`) and a GitHub Connection — Approve fails closed with clear prose
+- Local fixture proof does not need live git checkout; real PR open needs MARS + AG + Connection
 - Public GitHub pin URL and live MARS session evidence still TBD (PLATFORM blockers)
 
 ---
@@ -59,7 +59,7 @@ export HARNESS_INFERENCE_API_KEY=...
 
 **Empty path (no ask):** add `"force_empty": true`.
 
-Expect: stages through `draft` with no side effects; ask when findings exist; Approve → stub PR evidence; Deny → `status: denied`.
+Expect: stages through `draft` with no side effects; ask when findings exist; Approve → real draft PR when AG wired (mocked offline); Deny → `status: denied`.
 
 Full ask templates and MARS section: `mars-nightly-repo-audit/README.md`.
 
@@ -70,7 +70,7 @@ Full ask templates and MARS section: `mars-nightly-repo-audit/README.md`.
 Point at existing docs — no invented console UI:
 
 1. **PLATFORM.md** — Harness LangGraph pin, YAML spec shape, `doctl agent` start/show/attach/logs/remove, secrets hygiene, evidence path.
-2. **README → Run on DigitalOcean MARS** in `mars-nightly-repo-audit/README.md` (prereqs, pin SHA steps, harness env, tools/stub notes).
+2. **README → Run on DigitalOcean MARS** in `mars-nightly-repo-audit/README.md` (prereqs, pin SHA steps, harness env, Action Gateway tools/permissions).
 3. **Spec stubs:** `mars-nightly-repo-audit/mars.spec.example.yaml` and Shop `specs/mars-nightly-repo-audit.yaml`.
 
 **Honesty for schedules:** Partner Guide unattended triggers **reject** `permissions.default: ask`. Interactive MARS proof stays on `ask`; nightly cron needs a separate deny/allow trigger spec later (PLATFORM.md §4 Triggers) — not part of first pin proof.

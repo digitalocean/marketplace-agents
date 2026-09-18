@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+from nightly_repo_audit.action_gateway import McpServerConfig, set_mcp_client_factory
 from nightly_repo_audit.graph import compile_graph
 from nightly_repo_audit.repo_scan import default_fixture_path
 
 FIXTURE = str(default_fixture_path())
+
+
+def _reset_mcp_factory():
+    set_mcp_client_factory(None)
 
 
 def _run_to_interrupt(monkeypatch, thread_id: str = "nightly-ask"):
@@ -61,16 +69,67 @@ def test_resume_deny_no_pr(monkeypatch):
     assert final.get("decision") == "deny"
 
 
-def test_resume_approve_stub_pr(monkeypatch):
-    g, cfg, result = _run_to_interrupt(monkeypatch, "approve-path")
+class _ApproveMcpClient:
+    def list_tools(self) -> list[dict[str, Any]]:
+        return [{"name": "do.actions.github.create_pull_request"}]
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "html_url": (
+                                "https://github.com/acme/widgets/pull/9001"
+                            ),
+                            "number": 9001,
+                        }
+                    ),
+                }
+            ]
+        }
+
+
+def test_resume_approve_opens_draft_pr_via_ag(monkeypatch):
+    monkeypatch.setenv(
+        "HARNESS_MCP_SERVERS",
+        json.dumps(
+            [{"name": "do_actions", "url": "https://ag.example/mcp"}]
+        ),
+    )
+    monkeypatch.setenv("ALLOW_NET", "0")
+    set_mcp_client_factory(lambda _cfg: _ApproveMcpClient())  # noqa: ARG005
+
+    try:
+        g, cfg, result = _run_to_interrupt(monkeypatch, "approve-path")
+        assert "__interrupt__" in result
+
+        final = g.invoke(Command(resume="approve"), cfg)
+        assert "__interrupt__" not in final
+        assert final.get("status") == "opened"
+        assert final.get("skipped") is not True
+        assert final.get("decision") == "approve"
+        assert final.get("pr_title")
+        assert final.get("pr_body_md")
+        assert "github.com/acme/widgets/pull/9001" in (final.get("pr_url") or "")
+        assert final.get("pr_number") == 9001
+    finally:
+        _reset_mcp_factory()
+
+
+def test_resume_approve_fail_closed_without_gateway(monkeypatch):
+    monkeypatch.delenv("HARNESS_MCP_SERVERS", raising=False)
+    monkeypatch.setenv("ALLOW_NET", "0")
+
+    g, cfg, result = _run_to_interrupt(monkeypatch, "approve-no-ag")
     assert "__interrupt__" in result
 
     final = g.invoke(Command(resume="approve"), cfg)
-    assert "__interrupt__" not in final
-    assert final.get("status") == "opened"
-    assert final.get("skipped") is not True
-    assert final.get("decision") == "approve"
-    assert final.get("pr_title")
-    assert final.get("pr_body_md")
-    assert final.get("pr_url", "").startswith("https://")
-    assert final.get("pr_number") == 9001
+    assert final.get("status") == "error"
+    assert final.get("skipped") is True
+    assert not final.get("pr_url")
+    msg_text = " ".join(
+        getattr(m, "content", "") for m in (final.get("messages") or [])
+    ).lower()
+    assert "do_actions" in msg_text
