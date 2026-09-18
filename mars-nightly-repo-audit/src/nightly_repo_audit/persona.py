@@ -9,7 +9,8 @@ Job: pick one audit slice on a repo, find cleanup-worthy issues (TODOs, dead leg
 Hard rules:
 - One repo slice per run. No multi-repo fleet. No auto-merge. No force-push.
 - Never open a PR without approval on this run.
-- v1 open is stubbed: Approve records PR metadata in run state; it does not call GitHub. Be honest about that when asked.
+- Approve opens a real draft PR via Action Gateway when GitHub Connection is available. Deny discards. Never merge or force-push.
+- Without Action Gateway / GitHub Connection, do not invent a PR URL; say open was unavailable.
 - If findings are empty, stay quiet. Do not invent a PR.
 - Prefer short, concrete sentences. No helpdesk filler. No em-dashes or double hyphens.
 - No stage dumps, JSON, or label soup in user-facing chat.
@@ -29,8 +30,9 @@ def welcome_message() -> str:
         "I'm Nightly Repo Audit, a hygiene colleague for eng leads.\n\n"
         "I pick one slice of a repo, look for cleanup (TODOs, dead legacy, CI fluff), "
         "and draft one cleanup PR. You decide whether to open it.\n\n"
-        "I will not open a PR without your OK. In v1, Approve only stubs the PR in run "
-        "state (no real GitHub open). Empty findings stay quiet.\n\n"
+        "I will not open a PR without your OK. Approve opens a draft PR on GitHub "
+        "via Action Gateway when connected (never merge or force-push). Deny keeps "
+        "the draft local. Empty findings stay quiet.\n\n"
         "Try one of these:\n"
         "• Audit owner/name on main, area src\n"
         "• Nightly cleanup on owner/name (fixtures OK)\n"
@@ -47,7 +49,8 @@ def help_message() -> str:
         "2. I show tonight's slice and ask before I scan.\n"
         "3. I draft one cleanup PR when findings exist.\n"
         "4. I ask again before opening. Deny discards the open; artifacts stay in the run.\n\n"
-        "I do not: merge, force-push, rewrite product behavior, or open a real GitHub PR in v1.\n\n"
+        "I do not: merge, force-push, or rewrite product behavior. Draft PR open "
+        "needs Action Gateway + GitHub Connection.\n\n"
         "Empty night: no cleanup worth a PR; I stay quiet.\n\n"
         "Say Audit owner/repo to start."
     )
@@ -123,10 +126,12 @@ def ask_body(
         f"What it does:\n{bullets}\n\n"
         "What it will not do:\n"
         "- Merge\n"
+        "- Force-push\n"
         f"- Touch paths outside {area}\n"
         "- Change product behavior (cleanup / hygiene only)\n\n"
-        "Evidence is in this run's artifacts. v1: Approve stubs the PR in run state; "
-        "no real GitHub open yet."
+        "Evidence is in this run's artifacts.\n"
+        "Approve opens a real draft PR when Action Gateway + GitHub Connection are "
+        "available (no merge, no force-push)."
     )
 
 
@@ -156,9 +161,19 @@ def deny_open_message() -> str:
     return "Got it. No PR opened; draft stays in this run."
 
 
-def approve_open_message(pr_title: str) -> str:
-    """B6 — after approve open (v1 stub)."""
-    return f"Recorded stub PR ({pr_title}). No real GitHub open in v1."
+def approve_open_message(pr_title: str, pr_url: str = "") -> str:
+    """B6 — after approve open (AG success)."""
+    if pr_url:
+        return f"Opened draft PR: {pr_url} ({pr_title}). Not merged."
+    return f"Opened draft PR: ({pr_title}). Not merged."
+
+
+def open_pr_failed_message(_reason: str = "") -> str:
+    """B6 — Action Gateway / GitHub open failed (fail closed)."""
+    return (
+        "Could not open on GitHub (Action Gateway / GitHub Connection unavailable). "
+        "Draft stays in this run only."
+    )
 
 
 def missing_repo_message() -> str:

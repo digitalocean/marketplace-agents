@@ -1,3 +1,5 @@
+# Shop MARS pin — Nightly Repo Audit (Wave 1 AG: GitHub draft PR)
+# No real secrets in this file. Connections hold GitHub OAuth.
 name: mars-nightly-repo-audit
 agent: langgraph
 template: langgraph
@@ -11,5 +13,12 @@ env:
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
 secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+# Action Gateway — full catalog via do.actions; graph uses action_invoke → github_create_pull_request
+tools:
+  - do.actions
 permissions:
   default: ask
+  rules:
+    # Graph HITL is the human gate. Gateway MCP has no in-band ask — allow MCP after approve.
+    - tool: mcp
+      action: allow

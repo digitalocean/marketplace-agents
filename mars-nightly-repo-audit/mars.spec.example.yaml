@@ -16,5 +16,15 @@ env:
 secrets:
   HARNESS_INFERENCE_API_KEY: "<your-do-api-key>"
 
+# Action Gateway — platform injects HARNESS_MCP_SERVERS (base64 JSON) with
+# do_actions VPC URL. Graph binds MCP client and calls action_invoke →
+# github_create_pull_request (draft: true) after HITL approve.
+tools:
+  - do.actions
+
 permissions:
   default: ask
+  rules:
+    # Graph HITL is the human gate. Gateway MCP has no in-band ask — allow MCP after approve.
+    - tool: mcp
+      action: allow
