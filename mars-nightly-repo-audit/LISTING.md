@@ -4,7 +4,7 @@
 
 **Job-to-be-done:** Trigger → plan one audit area → gather/scan → analyze findings → draft cleanup PR metadata → **ask before open**.
 
-**Why MARS / LangGraph:** Interrupt-gated LangGraph agent built for DigitalOcean MARS Harness Runtime. Draft by default: Approve opens a real draft PR when Action Gateway and GitHub are wired; Deny discards the side effect and keeps artifacts. Same contract as the other top-3 agents — root `langgraph.json`, module-level `.compile()`, harness inference env.
+**Why MARS / LangGraph:** Interrupt-gated LangGraph agent built for DigitalOcean MARS Harness Runtime. **Approve** opens a **real draft PR** via Action Gateway when GitHub Connection is available. **Deny** discards the open; artifacts stay in the run. Same contract as the other top-3 agents — root `langgraph.json`, module-level `.compile()`, harness inference env.
 
 ---
 
@@ -13,6 +13,8 @@
 - Flow: `intake → plan → gather → analyze → draft → ask → act → report`
 - One cleanup PR **draft** per run (title, body, branch, diff_stat, patch summary)
 - HITL gate **Open cleanup PR?** — Approve / Discard (`approve` / `deny`)
+- **Approve** → real draft PR on GitHub via Action Gateway (`github_create_pull_request`, `draft: true`) when connected
+- **Deny** → no open; draft metadata stays in the run
 - Empty findings → `status: empty`, **no ask** (“No cleanup worth a PR tonight”)
 - Blocked checkout/tools → `status: blocked`, no ask
 - Deterministic local path on in-repo `fixtures/sample_repo/` (no API key)
@@ -20,26 +22,19 @@
 
 ## What you don’t (honesty)
 
-- No auto-merge, force-push, or multi-repo fleet audits
-- No product-feature rewrites — hygiene / cleanup scope only
+- No merge, no force-push, hygiene-only scope — ever
+- No product-feature rewrites
 - No Approve when findings are empty or the run is blocked
-- No PR open without Action Gateway (`do.actions`) and a GitHub Connection — Approve fails closed with clear prose
-- Local fixture proof does not need live git checkout; real PR open needs MARS + AG + Connection
+- **Without Action Gateway / GitHub Connection:** no real PR open, no fake `pr_url` — fail closed; draft stays local
+- Local fixture proof does not need live git checkout; real PR open needs MARS + AG + GitHub Connection
 - Public GitHub pin URL and live MARS session evidence still TBD (PLATFORM blockers)
 
 ---
 
 ## Getting Started
 
-Repo path on this machine:
-
 ```bash
-cd /home/box/Shop/mars-top3-agents/mars-nightly-repo-audit
-```
-
-Install, test, smoke (fixtures; no API key):
-
-```bash
+cd mars-nightly-repo-audit
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
@@ -67,12 +62,10 @@ Full ask templates and MARS section: `mars-nightly-repo-audit/README.md`.
 
 ## Pin on MARS when available
 
-Point at existing docs — no invented console UI:
+1. **PLATFORM.md** — Harness LangGraph pin, YAML spec shape, `doctl agent` start/show/attach/logs/remove, secrets hygiene.
+2. **README → Run on DigitalOcean MARS** in `mars-nightly-repo-audit/README.md` (prereqs, pin SHA, harness env, Action Gateway tools/permissions).
+3. **Spec stubs:** `mars-nightly-repo-audit/mars.spec.example.yaml` and `specs/mars-nightly-repo-audit.yaml` (`tools: [do.actions]`, `permissions.rules.mcp: allow`).
 
-1. **PLATFORM.md** — Harness LangGraph pin, YAML spec shape, `doctl agent` start/show/attach/logs/remove, secrets hygiene, evidence path.
-2. **README → Run on DigitalOcean MARS** in `mars-nightly-repo-audit/README.md` (prereqs, pin SHA steps, harness env, tools/stub notes).
-3. **Spec stubs:** `mars-nightly-repo-audit/mars.spec.example.yaml` and Shop `specs/mars-nightly-repo-audit.yaml`.
+**Honesty for schedules:** Partner Guide unattended triggers **reject** `permissions.default: ask`. Interactive MARS proof stays on `ask`; nightly cron needs a separate deny/allow trigger spec later — not part of first pin proof.
 
-**Honesty for schedules:** Partner Guide unattended triggers **reject** `permissions.default: ask`. Interactive MARS proof stays on `ask`; nightly cron needs a separate deny/allow trigger spec later (PLATFORM.md §4 Triggers) — not part of first pin proof.
-
-**Known gaps:** public `FRAMEWORK_REPO` HTTPS URL TBD; Managed Agents enablement 403 on current team; no live path-smoke yet.
+**Known gaps:** public `FRAMEWORK_REPO` HTTPS URL TBD; Managed Agents enablement 403 on current team; live MARS smoke pending Reed.

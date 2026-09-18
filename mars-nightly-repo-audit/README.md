@@ -14,7 +14,7 @@ Trigger → sandbox audit slice → one cleanup PR draft → ask before open. La
 - Auto-merge or force-push
 - Multi-repo fleet audits or product feature rewrites
 - Presenting Approve when findings are empty or checkout is blocked
-- Opening a PR without Action Gateway (`do.actions`) and a GitHub Connection wired
+- Inventing a PR URL without Action Gateway + GitHub Connection (fail closed; draft stays local)
 
 ## Run flow
 
@@ -30,8 +30,8 @@ When the graph reaches **ask**, the run pauses until you **Open draft PR** (`app
 
 | If you… | Resume | The agent will… |
 |---------|--------|-----------------|
-| **Open draft PR** | `approve` | Open a real draft PR on GitHub via Action Gateway when `do.actions` + GitHub Connection are wired; otherwise fail closed with a clear message |
-| **Discard** | `deny` | Keep artifacts; skip the side effect; finish with status `denied` |
+| **Open draft PR** | `approve` | Open a **real draft PR** on GitHub via Action Gateway when connected (never merge or force-push); otherwise fail closed — draft stays in the run |
+| **Discard** | `deny` | Discard the open; artifacts stay in the run (`status: denied`) |
 
 You will see: **Open cleanup PR?** plus branch, title, scope, diff_stat, what-it-does bullets, what-it-will-not-do, and an evidence line.
 
@@ -53,7 +53,8 @@ What it will not do:
 - Touch paths outside {area}
 - Change product behavior (cleanup / hygiene only)
 
-Evidence: findings + diff are in this run's artifacts.
+Evidence is in this run's artifacts.
+Approve opens a real draft PR when Action Gateway + GitHub Connection are available (no merge, no force-push).
 ```
 
 ## Run on DigitalOcean MARS
@@ -87,9 +88,10 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 **Permissions / tools**
 
 - Fixture scan uses in-repo `fixtures/sample_repo/` (deterministic filesystem scan)
-- Spec toolbelt: `tools: [do.actions: [do.actions.github.create_pull_request]]` (Nix catalog may refine the id); platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with the `do_actions` VPC MCP URL — graph binds MCP at runtime
-- `permissions.allow` must list the same PR-create tool id; `default: ask` alone blocks in-band gateway MCP calls
-- Approve opens a real **draft** PR via Action Gateway when a GitHub Connection is available; Deny never opens
+- Spec: `tools: [do.actions]` + `permissions.rules.mcp: allow` (see `mars.spec.example.yaml`)
+- Platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with the `do_actions` VPC MCP URL; graph binds MCP at runtime and calls **`github_create_pull_request`** (`draft: true`) after HITL approve
+- Credentials stay in Action Gateway Connections — not in agent `env`
+- Approve opens a real **draft** PR when GitHub Connection is available; Deny never opens; no fake `pr_url` without AG
 - Optional live LLM planning when harness key present (offline path needs no key)
 
 ## Smoke

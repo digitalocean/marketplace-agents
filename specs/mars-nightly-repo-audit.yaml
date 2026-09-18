@@ -13,10 +13,9 @@ secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
 
 tools:
-  - do.actions:
-      - do.actions.github.create_pull_request
+  - do.actions
 
 permissions:
   default: ask
-  allow:
-    - do.actions.github.create_pull_request
+  rules:
+    mcp: allow

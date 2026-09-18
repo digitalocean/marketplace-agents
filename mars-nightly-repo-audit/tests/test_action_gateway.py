@@ -27,7 +27,7 @@ class _FakeMcpClient:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def list_tools(self) -> list[dict[str, Any]]:
-        return [{"name": "do.actions.github.create_pull_request"}]
+        return [{"name": "github_create_pull_request"}]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.calls.append((name, arguments))
@@ -110,15 +110,13 @@ def test_get_do_actions_config_from_env(monkeypatch):
     assert cfg.name == "do_actions"
 
 
-def test_resolve_create_pr_tool_prefers_narrow_id():
+def test_resolve_create_pr_tool_prefers_catalog_id():
     tools = [
         {"name": "do.actions.github.list_repos"},
+        {"name": "github_create_pull_request"},
         {"name": "do.actions.github.create_pull_request"},
-        {"name": "create_pull_request"},
     ]
-    assert (
-        resolve_create_pr_tool(tools) == "do.actions.github.create_pull_request"
-    )
+    assert resolve_create_pr_tool(tools) == "github_create_pull_request"
 
 
 def test_resolve_create_pr_tool_falls_back_to_pattern():
@@ -165,7 +163,7 @@ def test_open_draft_pr_success_mocked(monkeypatch):
     assert result.ok
     assert result.pr_number == 42
     assert "github.com/acme/widgets/pull/42" in result.pr_url
-    assert result.tool_name == "do.actions.github.create_pull_request"
+    assert result.tool_name == "github_create_pull_request"
     assert fake.calls[0][1]["draft"] is True
     assert fake.calls[0][1]["head"] == "nightly/cleanup-src"
 

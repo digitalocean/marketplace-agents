@@ -71,7 +71,7 @@ def test_resume_deny_no_pr(monkeypatch):
 
 class _ApproveMcpClient:
     def list_tools(self) -> list[dict[str, Any]]:
-        return [{"name": "do.actions.github.create_pull_request"}]
+        return [{"name": "github_create_pull_request"}]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -132,4 +132,4 @@ def test_resume_approve_fail_closed_without_gateway(monkeypatch):
     msg_text = " ".join(
         getattr(m, "content", "") for m in (final.get("messages") or [])
     ).lower()
-    assert "do_actions" in msg_text
+    assert "action gateway" in msg_text or "github connection" in msg_text

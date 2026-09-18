@@ -13,12 +13,12 @@ from typing import Any, Callable
 
 DO_ACTIONS_SERVER_NAME = "do_actions"
 
-# Spec toolbelt + permissions.allow (Nix AG catalog discovery may refine).
-# Graph also resolves via tools/list at runtime when catalog ids differ.
-GITHUB_CREATE_PR_TOOL_ID = "do.actions.github.create_pull_request"
+# Nix AG catalog id (Wave 1 handoff). Graph also resolves via tools/list fallback.
+GITHUB_CREATE_PR_TOOL_ID = "github_create_pull_request"
 
 PREFERRED_CREATE_PR_TOOL_IDS = (
     GITHUB_CREATE_PR_TOOL_ID,
+    "do.actions.github.create_pull_request",
     "github.create_pull_request",
     "create_pull_request",
 )
