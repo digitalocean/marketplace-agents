@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 
 
 class SourceRecord(TypedDict, total=False):
@@ -29,7 +32,44 @@ class ConflictRecord(TypedDict, total=False):
     urls: list[str]
 
 
+class InputState(TypedDict, total=False):
+    """MARS / doctl chat input."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    question: str
+    audience: str
+    outbound: str
+    freshness_days: int
+    destination: str
+    subject: str
+    seed_urls: list[str]
+    fixture_sources: list[dict[str, Any]]
+    allow_net: bool
+
+
+class OutputState(TypedDict, total=False):
+    """Agent Server / doctl-visible output — chat text lives in ``messages`` only."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    status: str
+    brief_md: str
+    claims: list[dict[str, Any]]
+    conflicts: list[dict[str, Any]]
+    claim_count: int
+    sent: bool
+    skipped: bool
+    message_id: str
+    decision: str
+
+
 class ResearchState(TypedDict, total=False):
+    # MARS chat
+    messages: Annotated[list[AnyMessage], add_messages]
+    intent: str  # chat | help | research | research_plan | other
+    skip_plan_confirm: bool
+    plan_confirmed: bool
+    pending_research: dict[str, Any]
+
     # Intake
     question: str
     audience: str
@@ -39,6 +79,7 @@ class ResearchState(TypedDict, total=False):
     subject: str
     seed_urls: list[str]
     fixture_sources: list[dict[str, Any]]
+    allow_net: bool
 
     # Plan
     subquestions: list[str]
@@ -65,6 +106,6 @@ class ResearchState(TypedDict, total=False):
     sent: bool
 
     # Report
-    status: str  # ok | blocked | denied | empty | error
+    status: str  # ok | blocked | denied | empty | error | chat | help
     human_summary: str
     stage_summaries: list[str]
