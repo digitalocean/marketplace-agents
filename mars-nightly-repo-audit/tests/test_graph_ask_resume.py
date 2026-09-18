@@ -71,7 +71,7 @@ def test_resume_deny_no_pr(monkeypatch):
 
 class _ApproveMcpClient:
     def list_tools(self) -> list[dict[str, Any]]:
-        return [{"name": "github_create_pull_request"}]
+        return [{"name": "action_invoke"}, {"name": "action_search"}]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {

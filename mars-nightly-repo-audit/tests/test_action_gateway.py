@@ -9,13 +9,15 @@ from typing import Any
 import pytest
 
 from nightly_repo_audit.action_gateway import (
-    McpHttpClient,
+    ACTION_INVOKE_TOOL,
+    GITHUB_CREATE_PR_TOOL_ID,
     McpServerConfig,
+    build_action_invoke_payload,
     decode_harness_mcp_servers_raw,
     get_do_actions_config,
+    has_action_invoke,
     open_draft_pr,
     parse_harness_mcp_servers,
-    resolve_create_pr_tool,
     set_mcp_client_factory,
     split_repo_slug,
 )
@@ -27,7 +29,10 @@ class _FakeMcpClient:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def list_tools(self) -> list[dict[str, Any]]:
-        return [{"name": "github_create_pull_request"}]
+        return [
+            {"name": "action_search"},
+            {"name": ACTION_INVOKE_TOOL},
+        ]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.calls.append((name, arguments))
@@ -110,18 +115,29 @@ def test_get_do_actions_config_from_env(monkeypatch):
     assert cfg.name == "do_actions"
 
 
-def test_resolve_create_pr_tool_prefers_catalog_id():
-    tools = [
-        {"name": "do.actions.github.list_repos"},
-        {"name": "github_create_pull_request"},
-        {"name": "do.actions.github.create_pull_request"},
-    ]
-    assert resolve_create_pr_tool(tools) == "github_create_pull_request"
+def test_has_action_invoke():
+    assert has_action_invoke([{"name": ACTION_INVOKE_TOOL}])
+    assert not has_action_invoke([{"name": "action_search"}])
 
 
-def test_resolve_create_pr_tool_falls_back_to_pattern():
-    tools = [{"name": "github_open_pull_request"}]
-    assert resolve_create_pr_tool(tools) == "github_open_pull_request"
+def test_build_action_invoke_payload():
+    payload = build_action_invoke_payload(
+        owner="acme",
+        repo_name="widgets",
+        title="chore: cleanup",
+        body="## body",
+        branch="nightly/cleanup",
+        ref="main",
+    )
+    assert payload["rationale"] == "Open draft PR after human approve"
+    tool = payload["tools"][0]
+    assert tool["tool"] == GITHUB_CREATE_PR_TOOL_ID
+    args = tool["arguments"]
+    assert args["owner"] == "acme"
+    assert args["repo"] == "widgets"
+    assert args["draft"] is True
+    assert args["head"] == "nightly/cleanup"
+    assert args["base"] == "main"
 
 
 def test_split_repo_slug():
@@ -143,7 +159,7 @@ def test_open_draft_pr_missing_gateway():
     assert "do_actions" in result.error_message
 
 
-def test_open_draft_pr_success_mocked(monkeypatch):
+def test_open_draft_pr_success_via_action_invoke(monkeypatch):
     fake = _FakeMcpClient(
         McpServerConfig("do_actions", "http", "https://ag.example/mcp", {})
     )
@@ -163,20 +179,22 @@ def test_open_draft_pr_success_mocked(monkeypatch):
     assert result.ok
     assert result.pr_number == 42
     assert "github.com/acme/widgets/pull/42" in result.pr_url
-    assert result.tool_name == "github_create_pull_request"
-    assert fake.calls[0][1]["draft"] is True
-    assert fake.calls[0][1]["head"] == "nightly/cleanup-src"
+    assert result.tool_name == GITHUB_CREATE_PR_TOOL_ID
+    assert fake.calls[0][0] == ACTION_INVOKE_TOOL
+    tool_args = fake.calls[0][1]["tools"][0]["arguments"]
+    assert tool_args["draft"] is True
+    assert tool_args["head"] == "nightly/cleanup-src"
 
 
-def test_open_draft_pr_no_matching_tool(monkeypatch):
-    class _NoPrToolClient:
+def test_open_draft_pr_no_action_invoke(monkeypatch):
+    class _NoInvokeClient:
         def list_tools(self) -> list[dict[str, Any]]:
-            return [{"name": "do.actions.github.list_repos"}]
+            return [{"name": "action_search"}]
 
         def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             raise AssertionError("should not call")
 
-    set_mcp_client_factory(lambda _cfg: _NoPrToolClient())  # noqa: ARG005
+    set_mcp_client_factory(lambda _cfg: _NoInvokeClient())  # noqa: ARG005
     result = open_draft_pr(
         repo="acme/widgets",
         ref="main",
@@ -188,4 +206,4 @@ def test_open_draft_pr_no_matching_tool(monkeypatch):
         ),
     )
     assert not result.ok
-    assert "no github" in result.error_message.lower()
+    assert "action_invoke" in result.error_message

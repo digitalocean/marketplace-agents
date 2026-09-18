@@ -13,15 +13,10 @@ from typing import Any, Callable
 
 DO_ACTIONS_SERVER_NAME = "do_actions"
 
-# Nix AG catalog id (Wave 1 handoff). Graph also resolves via tools/list fallback.
+# Nix AG catalog id (Wave 1 handoff). Invoked via MCP meta tool action_invoke.
 GITHUB_CREATE_PR_TOOL_ID = "github_create_pull_request"
-
-PREFERRED_CREATE_PR_TOOL_IDS = (
-    GITHUB_CREATE_PR_TOOL_ID,
-    "do.actions.github.create_pull_request",
-    "github.create_pull_request",
-    "create_pull_request",
-)
+ACTION_INVOKE_TOOL = "action_invoke"
+ACTION_SEARCH_TOOL = "action_search"
 
 _CREATE_PR_RE = re.compile(r"(create[_-]?pull[_-]?request|open[_-]?pull[_-]?request)", re.I)
 
@@ -222,16 +217,60 @@ def get_do_actions_config(
     return None
 
 
-def resolve_create_pr_tool(tools: list[dict[str, Any]]) -> str | None:
-    """Pick the GitHub create-PR tool from a tools/list response."""
-    names = [str(t.get("name") or "") for t in tools if t.get("name")]
-    for preferred in PREFERRED_CREATE_PR_TOOL_IDS:
-        if preferred in names:
-            return preferred
-    for name in names:
-        if _CREATE_PR_RE.search(name):
-            return name
-    return None
+def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
+    return {str(t.get("name") or "") for t in tools if t.get("name")}
+
+
+def has_action_invoke(tools: list[dict[str, Any]]) -> bool:
+    return ACTION_INVOKE_TOOL in _tool_names(tools)
+
+
+def build_create_pr_arguments(
+    *,
+    owner: str,
+    repo_name: str,
+    title: str,
+    body: str,
+    branch: str,
+    ref: str,
+) -> dict[str, Any]:
+    return {
+        "owner": owner,
+        "repo": repo_name,
+        "title": title,
+        "body": body,
+        "head": branch,
+        "base": ref or "main",
+        "draft": True,
+    }
+
+
+def build_action_invoke_payload(
+    *,
+    owner: str,
+    repo_name: str,
+    title: str,
+    body: str,
+    branch: str,
+    ref: str,
+) -> dict[str, Any]:
+    """Action Gateway meta invoke payload (ACTION-GATEWAY-CONNECTIONS.md)."""
+    return {
+        "rationale": "Open draft PR after human approve",
+        "tools": [
+            {
+                "tool": GITHUB_CREATE_PR_TOOL_ID,
+                "arguments": build_create_pr_arguments(
+                    owner=owner,
+                    repo_name=repo_name,
+                    title=title,
+                    body=body,
+                    branch=branch,
+                    ref=ref,
+                ),
+            }
+        ],
+    }
 
 
 def split_repo_slug(repo: str) -> tuple[str, str]:
@@ -316,27 +355,25 @@ def open_draft_pr(
     try:
         client = _make_client(cfg)
         tools = client.list_tools()
-        tool_name = resolve_create_pr_tool(tools)
-        if not tool_name:
+        if not has_action_invoke(tools):
             return OpenPrResult(
                 ok=False,
                 error_message=(
-                    "Could not open the PR: Action Gateway is connected but no GitHub "
-                    "create-pull-request tool is available. Check the GitHub Connection "
-                    "and permissions.allow for do.actions GitHub PR tools."
+                    "Could not open the PR: Action Gateway is connected but action_invoke "
+                    "is not available. Check do.actions in the spec and permissions.rules "
+                    "mcp allow."
                 ),
             )
 
-        arguments = {
-            "owner": owner,
-            "repo": repo_name,
-            "title": title,
-            "body": body,
-            "head": branch,
-            "base": ref or "main",
-            "draft": True,
-        }
-        raw_result = client.call_tool(tool_name, arguments)
+        invoke_payload = build_action_invoke_payload(
+            owner=owner,
+            repo_name=repo_name,
+            title=title,
+            body=body,
+            branch=branch,
+            ref=ref,
+        )
+        raw_result = client.call_tool(ACTION_INVOKE_TOOL, invoke_payload)
         pr_url, pr_number = _extract_pr_fields(raw_result)
         if not pr_url and not pr_number:
             return OpenPrResult(
@@ -345,7 +382,7 @@ def open_draft_pr(
                     "GitHub accepted the call but I could not read a PR URL back. "
                     "Check Action Gateway logs and the GitHub Connection."
                 ),
-                tool_name=tool_name,
+                tool_name=GITHUB_CREATE_PR_TOOL_ID,
             )
         if not pr_url and pr_number:
             pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_number}"
@@ -353,7 +390,7 @@ def open_draft_pr(
             ok=True,
             pr_url=pr_url,
             pr_number=pr_number,
-            tool_name=tool_name,
+            tool_name=GITHUB_CREATE_PR_TOOL_ID,
         )
     except McpClientError as exc:
         return OpenPrResult(ok=False, error_message=str(exc))

@@ -28,7 +28,7 @@ from nightly_repo_audit.repo_scan import default_fixture_path  # noqa: E402
 
 class _SmokeApproveMcpClient:
     def list_tools(self):
-        return [{"name": "github_create_pull_request"}]
+        return [{"name": "action_invoke"}, {"name": "action_search"}]
 
     def call_tool(self, name, arguments):
         return {

@@ -126,6 +126,7 @@ def ask_body(
         f"What it does:\n{bullets}\n\n"
         "What it will not do:\n"
         "- Merge\n"
+        "- Force-push\n"
         f"- Touch paths outside {area}\n"
         "- Change product behavior (cleanup / hygiene only)\n\n"
         "Evidence is in this run's artifacts.\n"
