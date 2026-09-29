@@ -21,7 +21,6 @@ name: pulse-diag
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb
-persistent_workspace: true
 env:
   FRAMEWORK_REPO: "https://github.com/scott/marketplace-agents.git"
   FRAMEWORK_REPO_SHA: "<tip SHA of main after this package lands>"
