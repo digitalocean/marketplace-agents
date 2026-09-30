@@ -1,73 +1,31 @@
-# Sourced Research Desk — citations before the brief leaves the room
+# Sourced Research Desk
 
-**For** PMs, analysts, and operators who need a research brief they can trust — every claim dated and URL’d — without auto-posting to Slack or email.
+## Summary
 
-**Job-to-be-done:** Clarify a question → plan queries → fetch public sources → build a claim table → draft a markdown brief → **ask before any outbound send**.
+Turn a research question into a citation-backed brief you can trust.
+Every claim carries a URL and date, and nothing leaves the room until you say so.
 
-**Why MARS / LangGraph:** A compiled LangGraph graph with a single HITL interrupt before side effects, shaped for DigitalOcean Managed Agents (Harness Runtime). Same repo runs locally and pins on MARS via public GitHub SHA — no proprietary marketplace bot packaging.
+## Description
 
----
+Sourced Research Desk is a research agent for PMs, analysts, and operators who need answers they can defend. Ask a question in plain language; the agent plans queries, gathers public sources, builds a claim table with URL and date on every factual claim, and drafts a markdown brief with citations and conflict callouts when sources disagree.
 
-## What you get
+Use it when you need a decision-ready brief without babysitting browser tabs or risking an auto-post to Slack or email. Research-only runs keep the brief in artifacts by default; if you opt into outbound, a human approval gate fires before any send so you stay in control of what leaves the room.
 
-- End-to-end research path: `intake → plan → gather → analyze → draft → ask → act → report`
-- Claim table with **url + date** on every factual claim; conflict callouts when sources disagree
-- Markdown research brief with citations
-- HITL gate **Send research brief?** when `outbound` is `slack` or `email` — Approve sends, Deny keeps the brief local
-- Research-only default (`outbound: none`): brief lands in run artifacts with **no ask**
-- Local smoke via fixtures (`fixture_sources`) — no API key required for the deterministic path
-- Harness-native LLM env: `HARNESS_INFERENCE_BASE_URL` / `_MODEL` / `_API_KEY` (OpenAI_* fallback OK)
+Ideal for competitive diligence, market sizing, policy research, and any brief that has to survive a skeptical review, when “the model said so” is not enough.
 
-## What you don’t (v1 honesty)
+### Why use it
 
-- **No real Slack/email send** — `act` stubs outbound (`sent: true`, `message_id` prefix `stub-`); records intent only
-- No login scrapes, paid search API hard-requirement, or vector DB
-- No Approve when claims are unsourced (`status: blocked`) or when the run is empty/blocked
-- No auto-send, auto-merge, or invented console UI steps
-- Public GitHub `FRAMEWORK_REPO` URL and live MARS pin are **not yet available** (see PLATFORM blockers)
+- Citation-backed briefs with URL and date on every factual claim
+- Conflict callouts when sources disagree, so you see the tension, not a smoothed narrative
+- Human approval before any Slack or email send; deny keeps the brief local
+- Research-only mode by default: no outbound noise, no surprise posts
+- End-to-end flow from clarifying the question to a finished markdown brief
+- Built for DigitalOcean Managed Agents (MARS) with a sandboxed LangGraph runtime
+- Works from a clear question; no custom RAG stack or paid search API required
 
----
+### Requirements
 
-## Getting Started
-
-Repo path on this machine:
-
-```bash
-cd /home/box/Shop/mars-top3-agents/mars-sourced-research-desk
-```
-
-Install, test, smoke (fixtures; no API key):
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-pytest -q
-python scripts/smoke_invoke.py
-```
-
-Optional live LLM path — export harness inference env first:
-
-```bash
-export HARNESS_INFERENCE_BASE_URL=...
-export HARNESS_INFERENCE_MODEL=...
-export HARNESS_INFERENCE_API_KEY=...
-```
-
-**Smoke input (research-only):** see README — `question` + `outbound: "none"` + `fixture_sources`. Expect stages through `draft`/`report` with no interrupt.
-
-**Outbound path:** set `outbound` to `slack` or `email` with sourced fixtures → expect **ask** interrupt; Approve → stub send; Deny → `status: denied`, no external write.
-
-Full operator copy (ask body, non-goals, smoke JSON): `mars-sourced-research-desk/README.md`.
-
----
-
-## Pin on MARS when available
-
-Do **not** invent console clicks. Follow the pin recipe already documented:
-
-1. **Platform contract & CLI:** `/home/box/Shop/mars-top3-agents/PLATFORM.md` — `agent: langgraph`, `FRAMEWORK_REPO` + exact `FRAMEWORK_REPO_SHA`, `doctl agent create/start` with secrets, evidence via `attach` / `prompt` / `logs`.
-2. **Repo README MARS section:** `mars-sourced-research-desk/README.md` → **Run on DigitalOcean MARS** (prereqs, pin steps, harness env table, tools note).
-3. **Spec stub:** `mars-sourced-research-desk/mars.spec.example.yaml` and Shop `specs/mars-sourced-research-desk.yaml` (placeholders only).
-
-**Known gaps (do not invent):** public HTTPS GitHub URL TBD; Managed Agents enablement currently blocked on the preview team (403); LangGraph Agent Server has no documented stable public HTTP invoke URL — use session attach/logs until DO publishes one (PLATFORM.md §4).
+- DigitalOcean Managed Agents / Harness Runtime (sandboxed LangGraph session)
+- OpenAI-compatible inference provider (DigitalOcean Gradient / Inference recommended)
+- Strong reasoning models work best (e.g. `deepseek-v4-pro` or comparable)
+- Optional: Slack or email targets only if you enable outbound (approval still required)

@@ -1,36 +1,32 @@
-# Ghost Writer — research, draft, publish (with your OK)
+# Ghost Writer
 
-**For** content operators who want an AI blog author that researches the web, writes full HTML drafts, and publishes to Ghost or WordPress — without surprise posts.
+## Summary
 
-**Job-to-be-done:** Brainstorm → research → full draft in chat → **publish only after you confirm** (or autonomous publish via `__GW_PUBLISH__`).
+Research the web, draft a full HTML post, and publish only when you say go.
+An AI blog author for Ghost or WordPress, without surprise posts.
 
-**Why MARS / LangGraph:** Fourth agent in the marketplace-agents monorepo — compiled graph keyed **`agent`**, pin with `FRAMEWORK_SUBDIR=mars-ghost-writer`.
+## Description
 
----
+Ghost Writer is a content agent for operators and marketers who want researched, publish-ready blog posts without giving an AI an unsupervised byline. Describe a topic; the agent brainstorms angles, searches the web for current context, and presents a complete HTML draft in chat so you can edit, reject, or green-light publish.
 
-## What you get
+Use it when you need a steady cadence of posts but still want editorial control. In chat mode, nothing hits Ghost or WordPress until you confirm. For scheduled or headless runs, an explicit publish sentinel lets you automate the pipeline when you are ready to trust the loop.
 
-- Chat path: brainstorm, research, draft, explicit publish gate
-- Autonomous publish sentinel (`__GW_PUBLISH__` / `GW_RUN_MODE=publish`)
-- Ghost + WordPress clients, optional feature images
-- Offline pytest (`ALLOW_NET=0`); harness LLM env with OpenAI fallback
+Ideal for product blogs, developer education, changelog-style explainers, and anyone who wants research-backed drafts that land in their CMS, with a human gate before the public post.
 
-## What you don't
+### Why use it
 
-- Standalone FastAPI/TUI/Docker from upstream repo (MARS graph only here)
-- Publish without confirmation in chat mode
-- Live web search in offline tests (mocked)
+- Full HTML drafts in chat: title, body, and structure ready to review
+- Web research for current angles before the draft, not after
+- Publish only after you confirm (chat) or an explicit publish sentinel (autonomous)
+- Native clients for Ghost and WordPress, including optional feature images
+- Keeps editorial control: no surprise posts from a runaway agent
+- Works for interactive authoring and scheduled / headless publish runs
+- Built for DigitalOcean Managed Agents (MARS) with a sandboxed LangGraph runtime
 
----
+### Requirements
 
-## Getting Started
-
-```bash
-pip install -r mars-ghost-writer/requirements.txt
-cd mars-ghost-writer
-export ALLOW_NET=0
-pytest -q
-python scripts/smoke_invoke.py
-```
-
-Operator README: `mars-ghost-writer/README.md`. Spec: `specs/mars-ghost-writer.yaml`.
+- DigitalOcean Managed Agents / Harness Runtime (sandboxed LangGraph session)
+- OpenAI-compatible inference provider (DigitalOcean Gradient / Inference recommended)
+- Strong writing / reasoning models work best (e.g. `deepseek-v4-pro` or comparable)
+- Network egress for live web research
+- Ghost or WordPress credentials (`BLOG_TYPE`, `BLOG_URL`, `BLOG_API_KEY`) to publish

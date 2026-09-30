@@ -11,6 +11,22 @@ Each agent lives in its own subdirectory. Pin with the same `FRAMEWORK_REPO` + `
 | `mars-competitor-pulse` | Competitor Pulse |
 | `mars-ghost-writer` | Ghost Writer |
 
+## Install and run with doctl (no Marketplace)
+
+To create and chat with these agents from the CLI — without the Agent Marketplace — see **[DOCTL.md](./DOCTL.md)**. Short path:
+
+```bash
+# pin FRAMEWORK_REPO_SHA in the chosen specs/*.yaml, then:
+doctl agent create \
+  --spec specs/mars-competitor-pulse.yaml \
+  --name competitor-pulse \
+  --secret HARNESS_INFERENCE_API_KEY=@~/.secrets/do-inference.key
+
+doctl agent launch competitor-pulse
+```
+
+`doctl agent` is an alias of `doctl harness-runtime`. Specs for all four agents live under `specs/`.
+
 ## MARS pin (per agent)
 
 ```yaml
