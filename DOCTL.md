@@ -45,6 +45,7 @@ Ready-to-edit manifests live under `specs/`:
 |------|--------|--------|
 | `specs/mars-sourced-research-desk.yaml` | Sourced Research Desk | `mars-sourced-research-desk` |
 | `specs/mars-nightly-repo-audit.yaml` | Nightly Repo Audit | `mars-nightly-repo-audit` |
+| `specs/mars-nightly-repo-security-scan.yaml` | Nightly Repo Security Scan | `mars-nightly-repo-security-scan` |
 | `specs/mars-competitor-pulse.yaml` | Competitor Pulse | `mars-competitor-pulse` |
 | `specs/mars-ghost-writer.yaml` | Ghost Writer | `mars-ghost-writer` |
 
@@ -149,6 +150,7 @@ Example first messages by agent:
 | Competitor Pulse | `Track OpenAI, Anthropic, and Google` |
 | Sourced Research Desk | A research question (outbound stays off unless you ask to send) |
 | Nightly Repo Audit | Ask for a hygiene audit / cleanup PR draft on a repo |
+| Nightly Repo Security Scan | Ask for a security scan / fix draft PR on a repo (`grok-4.7`) |
 | Ghost Writer | Brainstorm or draft a post on a topic in `BLOG_TOPIC` |
 
 ### Headless one-shot prompt
@@ -202,6 +204,7 @@ Or pass a PAT with `--secret GITHUB_TOKEN=...`. Harness uses it only for a shall
 - **Sourced Research Desk** — research-only by default (`outbound: none`); ask appears only when you request Slack/email send and claims are sourced.
 - **Competitor Pulse** — name companies in plain English; notify/ask is off unless you ask to alert. First run establishes a baseline (“first look”), not a fake material crisis.
 - **Nightly Repo Audit** — fixture/local path needs no Action Gateway; real draft PR open needs `do.actions` + GitHub Connection (see above).
+- **Nightly Repo Security Scan** — same Action Gateway draft-PR gate as Nightly Repo Audit. Spec pins `HARNESS_INFERENCE_MODEL: grok-4.7`. Fixture path needs no key; Approve opens a draft PR when GitHub is connected.
 - **Ghost Writer** — chat drafts need confirmation before publish; set blog secrets for CMS write.
 
 Per-agent behavior, smoke inputs, and local pytest paths are in each subdirectory’s `README.md`.

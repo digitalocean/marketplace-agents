@@ -1,0 +1,7 @@
+{
+  "name": "sample-service",
+  "private": true,
+  "dependencies": {
+    "lodash": "4.17.15"
+  }
+}

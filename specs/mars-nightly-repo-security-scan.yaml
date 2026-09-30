@@ -1,0 +1,26 @@
+# Shop MARS pin — Nightly Repo Security Scan (draft PR after a security fix)
+# No real secrets in this file. Connections hold GitHub OAuth.
+# HARNESS_INFERENCE_MODEL is Grok 4.7. SECURITY_SCAN_LLM_REVIEW asks that
+# model for a short PR note; the code and dependency fixes stay deterministic.
+name: mars-nightly-repo-security-scan
+agent: langgraph
+template: langgraph
+size: mv-2vcpu-4gb
+env:
+  FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"
+  FRAMEWORK_REPO_SHA: "<exact-commit-sha>"
+  FRAMEWORK_SUBDIR: "mars-nightly-repo-security-scan"
+  HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
+  HARNESS_INFERENCE_MODEL: grok-4.7
+  SECURITY_SCAN_LLM_REVIEW: "1"
+secrets:
+  HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+# Action Gateway — full catalog via do.actions; graph uses action_invoke → github_create_pull_request
+tools:
+  - do.actions
+permissions:
+  default: ask
+  rules:
+    # Graph HITL is the human gate. Gateway MCP has no in-band ask — allow MCP after approve.
+    - tool: mcp
+      action: allow

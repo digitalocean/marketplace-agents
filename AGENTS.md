@@ -243,6 +243,7 @@ Optional: add more `envDefaults` / `secretSlots` when the agent needs them (see 
 | Nightly Repo Audit | `814d8a64ff9c8bc30d8ca0af` | `nightly-repo-audit` | `mars-nightly-repo-audit` |
 | Competitor Pulse | `9557dfbccd5bafca7811aec2` | `competitor-pulse` | `mars-competitor-pulse` |
 | Ghost Writer | `4e4673e65050028cb571650a` | `ghost-writer` | `mars-ghost-writer` |
+| Nightly Repo Security Scan | *(create after SHA pin)* | `nightly-repo-security-scan` | `mars-nightly-repo-security-scan` |
 
 ---
 
