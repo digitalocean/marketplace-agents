@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
 
 from audit_helpers import assistant_summary
 from nightly_repo_audit.graph import compile_graph
@@ -11,6 +12,7 @@ from nightly_repo_audit.intent import (
     is_audit_request,
     is_chat_message,
     is_help_message,
+    parse_audit_target,
 )
 from nightly_repo_audit.persona import help_message
 from nightly_repo_audit.nodes import intake
@@ -93,6 +95,59 @@ def test_audit_nl_not_help():
         assert classify_intent(text) == "audit_plan"
         assert is_audit_request(text)
         assert classify_intent(text) != "help"
+
+
+def test_parse_github_url():
+    parsed = parse_audit_target(
+        "audit https://github.com/digitalocean/marketplace-agents"
+    )
+    assert parsed == {
+        "repo": "digitalocean/marketplace-agents",
+        "ref": "",
+        "area": "",
+    }
+    dotted = parse_audit_target(
+        "https://github.com/digitalocean/marketplace-agents.git"
+    )
+    assert dotted["repo"] == "digitalocean/marketplace-agents"
+    tree = parse_audit_target(
+        "https://github.com/acme/api/tree/develop"
+    )
+    assert tree["repo"] == "acme/api"
+    assert tree["ref"] == "develop"
+    slug = parse_audit_target("Audit acme/widgets on main, area src")
+    assert slug == {"repo": "acme/widgets", "ref": "main", "area": "src"}
+
+
+def test_chat_url_sets_repo_not_fixture(monkeypatch):
+    _offline(monkeypatch)
+    g = compile_graph(checkpointer=MemorySaver())
+    cfg = {"configurable": {"thread_id": "audit-url"}}
+    result = g.invoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content="audit https://github.com/digitalocean/marketplace-agents"
+                )
+            ]
+        },
+        cfg,
+    )
+    assert "__interrupt__" in result
+    body = result["__interrupt__"][0].value.get("body") or ""
+    assert "digitalocean/marketplace-agents" in body
+    assert "local/sample" not in body
+    snap = g.get_state(cfg).values
+    assert snap.get("repo") == "digitalocean/marketplace-agents"
+    assert snap.get("remote_checkout") is True
+    assert not snap.get("fixture_path")
+
+
+def test_audit_without_repo_asks(monkeypatch):
+    _offline(monkeypatch)
+    result = intake({"messages": [HumanMessage(content="audit this please")]})
+    assert result.get("intent") == "other"
+    assert "need a repo" in assistant_summary(result).lower()
 
 
 def test_approve_deny_with_pending_audit():

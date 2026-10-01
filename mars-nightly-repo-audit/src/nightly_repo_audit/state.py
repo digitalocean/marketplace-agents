@@ -58,7 +58,8 @@ class AuditState(TypedDict, total=False):
     ref: str
     trigger: str  # cron | manual
     area_hint: str
-    fixture_path: str  # v1: in-repo fixtures/sample_repo
+    fixture_path: str  # set for fixture runs; empty when cloning GitHub
+    remote_checkout: bool
     force_empty: bool  # test helper: skip findings
     force_blocked: bool  # test helper: simulate checkout failure
 

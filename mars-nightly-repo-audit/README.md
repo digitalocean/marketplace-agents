@@ -5,8 +5,9 @@ Trigger → sandbox audit slice → one cleanup PR draft → ask before open. La
 ## What it does
 
 - Plans a nightly audit slice (path/theme) for one repo
-- Scans an in-repo fixture sandbox (v1 local) for hygiene findings (TODO/FIXME, unused legacy)
-- Drafts cleanup PR metadata (branch, title, body, diff_stat)
+- Reads `owner/name` or a `https://github.com/owner/name` URL from chat, then clones that ref
+- Scans the clone for hygiene findings (TODO/FIXME, unused legacy). A `fixture_path` payload still scans `fixtures/sample_repo`
+- Deletes unused legacy files and comment-only TODO/FIXME lines, commits them, and pushes `nightly/cleanup-<area>` before asking
 - Stops for human approval before opening a PR
 - **On Approve:** opens a **real draft PR** on GitHub via Action Gateway when a GitHub Connection is available
 
@@ -15,7 +16,7 @@ Trigger → sandbox audit slice → one cleanup PR draft → ask before open. La
 - Auto-merge or force-push
 - Multi-repo fleet audits or product feature rewrites
 - Presenting Approve when findings are empty or checkout is blocked
-- Opening a GitHub PR when Action Gateway / GitHub Connection is missing (local fixture path stays metadata-only for proof)
+- Opening a GitHub PR when Action Gateway / GitHub Connection is missing (fixture path stays metadata-only and does not push)
 
 ## Run flow
 
@@ -66,7 +67,7 @@ When Action Gateway + GitHub Connection are available, Approve opens a real draf
 - DigitalOcean account with Managed Agents / MARS access (Private Preview as applicable)
 - This repo public on GitHub (MARS pins a SHA)
 - Inference available via harness env (see below)
-- For real PR open: Action Gateway enabled and a GitHub Connection on the agent
+- For real PR open: Action Gateway enabled, a GitHub Connection on the agent, and `GITHUB_TOKEN` or `GH_TOKEN` with contents write so the branch can be pushed before Approve
 
 **Pin**
 
@@ -91,8 +92,10 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 **Permissions / tools**
 
-- Local/fixture path uses in-repo `fixtures/sample_repo/` (deterministic filesystem scan; no AG required)
+- Chat names the repo (`https://github.com/owner/name` or `owner/name`). Gather shallow-clones that ref. `fixture_path` still scans `fixtures/sample_repo` and does not push
+- On a clone, draft commits safe cleanup and pushes the branch, then ask runs. Approve calls Action Gateway
 - MARS `open_pr` uses Action Gateway (`do.actions`) via MCP `action_invoke` → `github_create_pull_request` (`draft: true`) after HITL approve
+- Push auth is `GITHUB_TOKEN` or `GH_TOKEN` (contents write). The Action Gateway GitHub Connection is still what opens the pull request
 - Spec: `tools: [do.actions]` + `permissions.rules` mcp allow (see `mars.spec.example.yaml`)
 - Platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with `do_actions` VPC URL; graph binds MCP client at runtime
 - Credentials stay in Action Gateway Connections — not in agent `env`

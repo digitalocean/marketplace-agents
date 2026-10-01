@@ -201,7 +201,7 @@ Or pass a PAT with `--secret GITHUB_TOKEN=...`. Harness uses it only for a shall
 
 - **Sourced Research Desk** — research-only by default (`outbound: none`); ask appears only when you request Slack/email send and claims are sourced.
 - **Competitor Pulse** — name companies in plain English; notify/ask is off unless you ask to alert. First run establishes a baseline (“first look”), not a fake material crisis.
-- **Nightly Repo Audit** — fixture/local path needs no Action Gateway; real draft PR open needs `do.actions` + GitHub Connection (see above).
+- **Nightly Repo Audit** — chat accepts `https://github.com/owner/name` or `owner/name` and clones that ref. Fixture path needs no Action Gateway. A real draft PR needs the cleanup branch pushed (`GITHUB_TOKEN` or `GH_TOKEN`, contents write) plus `do.actions` and a GitHub Connection.
 - **Ghost Writer** — chat drafts need confirmation before publish; set blog secrets for CMS write.
 
 Per-agent behavior, smoke inputs, and local pytest paths are in each subdirectory’s `README.md`.

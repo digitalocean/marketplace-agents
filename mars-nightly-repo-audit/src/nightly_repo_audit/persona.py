@@ -34,7 +34,8 @@ def welcome_message() -> str:
         "via Action Gateway when connected (never merge or force-push). Deny keeps "
         "the draft local. Empty findings stay quiet.\n\n"
         "Try one of these:\n"
-        "• Audit owner/name on main, area src\n"
+        "• Audit https://github.com/acme/api\n"
+        "• Audit acme/api on main, area src\n"
         "• Nightly cleanup on owner/name (fixtures OK)\n"
         "• Audit owner/name and prepare a draft PR\n\n"
         "Or ask what I can do."
@@ -168,17 +169,24 @@ def approve_open_message(pr_title: str, pr_url: str = "") -> str:
     return f"Opened draft PR: ({pr_title}). Not merged."
 
 
-def open_pr_failed_message(_reason: str = "") -> str:
+def open_pr_failed_message(reason: str = "") -> str:
     """B6 — Action Gateway / GitHub open failed (fail closed)."""
-    return (
-        "Could not open on GitHub (Action Gateway / GitHub Connection unavailable). "
-        "Draft stays in this run only."
-    )
+    detail = (reason or "").strip()
+    if not detail:
+        detail = (
+            "Could not open on GitHub (Action Gateway / GitHub Connection unavailable)."
+        )
+    if not detail.endswith("."):
+        detail += "."
+    return f"{detail} Draft stays in this run only."
 
 
 def missing_repo_message() -> str:
     """B6 — short error."""
-    return "I need a repo to audit. Example: Audit acme/api on main, area src"
+    return (
+        "I need a repo to audit. Example: Audit https://github.com/acme/api "
+        "or Audit acme/api on main, area src"
+    )
 
 
 def unreadable_area_message() -> str:
