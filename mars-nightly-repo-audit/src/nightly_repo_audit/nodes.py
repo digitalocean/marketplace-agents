@@ -7,10 +7,16 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from nightly_repo_audit.action_gateway import open_draft_pr
+from nightly_repo_audit.checkout import (
+    CheckoutError,
+    clone_github_repo,
+    is_remote_repo,
+    publish_branch,
+)
 from nightly_repo_audit.converse import conversational_reply
 from nightly_repo_audit.hygiene import hygiene_text
-from nightly_repo_audit.intent import classify_intent
-from nightly_repo_audit.action_gateway import open_draft_pr
+from nightly_repo_audit.intent import classify_intent, parse_audit_target
 from nightly_repo_audit.persona import (
     approve_open_message,
     ask_body,
@@ -18,13 +24,14 @@ from nightly_repo_audit.persona import (
     blocked_checkout_message,
     deny_open_message,
     empty_message,
+    missing_repo_message,
     open_pr_failed_message,
     plan_confirm_body,
     plan_confirm_title,
     plan_confirmed_message,
     plan_declined_message,
 )
-from nightly_repo_audit.repo_scan import default_fixture_path, scan_repo
+from nightly_repo_audit.repo_scan import apply_hygiene, default_fixture_path, scan_repo
 from nightly_repo_audit.state import AuditState
 
 ASSISTANT_DISPLAY_NAME = "Nightly Repo Audit"
@@ -156,14 +163,34 @@ def intake(state: AuditState) -> dict[str, Any]:
             **_assistant_reply(blocked),
         }
 
-    repo = (state.get("repo") or "local/sample").strip()
-    ref = (state.get("ref") or "main").strip()
+    parsed = parse_audit_target(human_text) if human_text.strip() else {}
+    state_repo = (state.get("repo") or "").strip()
+    repo = (parsed.get("repo") or state_repo).strip()
+    if human_text.strip() and audit_intent == "audit_plan" and not repo:
+        reply = missing_repo_message()
+        return {
+            "intent": "other",
+            "status": "other",
+            "skipped": False,
+            "findings": [],
+            "human_summary": reply,
+            "stage_summaries": _append_summary(state, "intake: missing repo"),
+            **_assistant_reply(reply),
+        }
+    if not repo:
+        repo = "local/sample"
+    ref = (parsed.get("ref") or (state.get("ref") or "").strip() or "main").strip()
     trigger = (state.get("trigger") or "manual").strip().lower()
     if trigger not in {"cron", "manual"}:
         trigger = "manual"
-    area_hint = (state.get("area_hint") or "").strip()
-    fixture_path = (state.get("fixture_path") or "").strip()
-    if not fixture_path:
+    area_hint = (parsed.get("area") or (state.get("area_hint") or "").strip())
+    explicit_fixture = (state.get("fixture_path") or "").strip()
+    remote_checkout = is_remote_repo(repo) and not explicit_fixture
+    if explicit_fixture:
+        fixture_path = explicit_fixture
+    elif remote_checkout:
+        fixture_path = ""
+    else:
         fixture_path = str(default_fixture_path())
 
     summary = f"Auditing `{repo}` @ `{ref}`."
@@ -174,6 +201,7 @@ def intake(state: AuditState) -> dict[str, Any]:
         "trigger": trigger,
         "area_hint": area_hint,
         "fixture_path": fixture_path,
+        "remote_checkout": remote_checkout,
         "status": "ok",
         "human_summary": summary,
         "stage_summaries": _append_summary(state, f"intake: {summary}"),
@@ -313,7 +341,25 @@ def gather(state: AuditState) -> dict[str, Any]:
     if state.get("status") == "blocked":
         return {}
 
-    checkout = Path(state.get("fixture_path") or default_fixture_path())
+    if state.get("remote_checkout"):
+        repo = state.get("repo") or ""
+        ref = state.get("ref") or "main"
+        try:
+            checkout = clone_github_repo(repo, ref)
+        except CheckoutError as exc:
+            blocked = hygiene_text(f"{blocked_checkout_message(repo)} {exc}")
+            return {
+                "status": "blocked",
+                "checkout_path": "",
+                "files_touched_count": 0,
+                "commands_run": [f"git clone {repo} @ {ref} failed"],
+                "human_summary": blocked,
+                "stage_summaries": _append_summary(state, "gather: blocked, clone failed"),
+                "findings": [],
+                **_assistant_reply(blocked),
+            }
+    else:
+        checkout = Path(state.get("fixture_path") or default_fixture_path())
     if not checkout.is_dir():
         return {
             "status": "blocked",
@@ -482,7 +528,7 @@ def draft(state: AuditState) -> dict[str, Any]:
 
     preview = "\n".join(f"- {b}" for b in patch_summary[:5])
     summary = f"PR draft ready: {pr_title}\n{preview}"
-    return {
+    drafted = {
         "patch_summary": patch_summary,
         "diff_stat": diff_stat,
         "commit_message": commit_message,
@@ -493,6 +539,44 @@ def draft(state: AuditState) -> dict[str, Any]:
         "human_summary": summary,
         "stage_summaries": _append_summary(state, f"draft: {pr_title}"),
     }
+    if not state.get("remote_checkout"):
+        return drafted
+
+    checkout = Path(state.get("checkout_path") or "")
+    try:
+        changed = apply_hygiene(checkout, findings)
+        if not changed:
+            quiet = (
+                "I found notes, but none were comment-only TODOs or unused legacy "
+                "files, so I did not commit. No PR."
+            )
+            return {
+                "status": "empty",
+                "human_summary": quiet,
+                "stage_summaries": _append_summary(state, "draft: nothing safe to commit"),
+                **_assistant_reply(quiet),
+            }
+        publish_branch(
+            checkout,
+            branch=branch_name,
+            message=commit_message,
+            repo=repo,
+        )
+    except CheckoutError as exc:
+        failed = hygiene_text(f"Could not push the cleanup branch. {exc}")
+        return {
+            "status": "error",
+            "human_summary": failed,
+            "pr_title": pr_title,
+            "pr_body_md": pr_body_md,
+            "branch_name": branch_name,
+            "stage_summaries": _append_summary(state, "draft: push failed"),
+            **_assistant_reply(failed),
+        }
+    summaries = list(drafted["stage_summaries"])
+    summaries.append(f"draft: pushed {branch_name}")
+    drafted["stage_summaries"] = summaries
+    return drafted
 
 
 # ---------------------------------------------------------------------------
