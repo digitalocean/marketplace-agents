@@ -14,6 +14,8 @@ env:
 
 secrets:
   HARNESS_INFERENCE_API_KEY: "<your-do-api-key>"
+  # Required. Contents write on the repo named in chat. Pass with --secret.
+  GITHUB_TOKEN: "<github-pat-with-contents-write>"
 
 # Action Gateway — platform injects HARNESS_MCP_SERVERS (base64 JSON) with
 # do_actions VPC URL. Graph binds MCP client and calls action_invoke →
