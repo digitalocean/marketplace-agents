@@ -97,7 +97,7 @@ Full doctl notes: [DOCTL.md](./DOCTL.md).
 
 ### 3. Marketplace listing markdown
 
-Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary` and `description`. Follow the existing four files:
+Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary`, `description`, and `gettingStarted`. Follow the existing four files:
 
 ```markdown
 # Display Name
@@ -114,10 +114,16 @@ Customer-facing paragraphs…
 
 - …
 
+### Getting Started
+
+Setup and first-run steps. Include this section only when the agent needs them.
+
 ### Requirements
 
 - …
 ```
+
+`### Getting Started` is optional. When it is present, store its body as `customData.gettingStarted` (a string) and leave that section out of `description`. Omit `gettingStarted` when the listing has no Getting Started section.
 
 Do **not** put local install paths, fixture smoke recipes, or “PLATFORM blockers” in this file — keep those in the package `README.md`.
 
@@ -130,7 +136,7 @@ Wire the new row into the root [README.md](./README.md) agent table when you ope
 - [ ] `langgraph.json` registers **`agent`**
 - [ ] `requirements.txt` uses `-e ./mars-<slug>/`
 - [ ] `specs/mars-<slug>.yaml` present and doctl-createable
-- [ ] `listings/<slug>.md` has `## Summary` and `## Description`
+- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
 - [ ] Tests / smoke pass; PR merged (or SHA agreed) for the pin you will publish
 
 ---
@@ -169,7 +175,8 @@ Notes from production use:
   ],
   "customData": {
     "summary": "<from listings/<slug>.md ## Summary>",
-    "description": "<from listings/<slug>.md ## Description through Requirements>",
+    "description": "<from listings/<slug>.md ## Description through Requirements, excluding ### Getting Started>",
+    "gettingStarted": "<string; from listings/<slug>.md ### Getting Started, only when that section is present>",
     "agent": {
       "adapter": "langgraph",
       "template": "langgraph",
@@ -231,7 +238,7 @@ Optional: add more `envDefaults` / `secretSlots` when the agent needs them (see 
 1. `GET /apps` — find `current` (and any `unpublished` pending version).
 2. If latest is `pending` or `inReview`, **stop** until that version is resolved.
 3. `GET /apps/{appId}/versions/{version}` for the approved current version.
-4. Merge: refresh `summary` / `description` from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
+4. Merge: refresh `summary`, `description`, and `gettingStarted` (when the listing has a Getting Started section) from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
 5. `PUT` with `reasonForUpdate` set.
 6. Hand off to Marketplace for review if the new version is not yet live.
 
