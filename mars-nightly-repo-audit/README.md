@@ -74,7 +74,7 @@ When Action Gateway + GitHub Connection are available, Approve opens a real draf
 1. Create or open a MARS agent environment that accepts a LangGraph Agent Server app.
 2. Point it at this GitHub repo; pin commit SHA `{sha}`.
 3. Ensure root `langgraph.json` is detected (graph export via module-level `.compile(name="NightlyRepoAudit")`).
-4. Set harness inference env (names below). Do not hardcode keys in the repo.
+4. Set harness inference env (names below) and the required secret `GITHUB_TOKEN` (contents write). Do not hardcode keys in the repo.
 5. Attach GitHub Connection / Action Gateway so Approve can open draft PRs.
 6. Deploy / start the agent server; run one smoke invoke (see Smoke).
 
@@ -95,7 +95,8 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 - Chat names the repo (`https://github.com/owner/name` or `owner/name`). Gather shallow-clones that ref. `fixture_path` still scans `fixtures/sample_repo` and does not push
 - On a clone, draft commits safe cleanup and pushes the branch, then ask runs. Approve calls Action Gateway
 - MARS `open_pr` uses Action Gateway (`do.actions`) via MCP `action_invoke` → `github_create_pull_request` (`draft: true`) after HITL approve
-- Push auth is `GITHUB_TOKEN` or `GH_TOKEN` (contents write). The Action Gateway GitHub Connection is still what opens the pull request
+- Push auth is the required secret `GITHUB_TOKEN` (or `GH_TOKEN`) with contents write. The Action Gateway GitHub Connection is still what opens the pull request
+- Daily cron: `specs/mars-nightly-repo-audit-trigger.yaml` (`permissions.default: allow`). A trigger rejects the interactive spec because its default is `ask`. The run still pauses for the plan confirm and the open-PR ask. See the listing Getting Started for the `doctl harness-runtime triggers create` command.
 - Spec: `tools: [do.actions]` + `permissions.rules` mcp allow (see `mars.spec.example.yaml`)
 - Platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with `do_actions` VPC URL; graph binds MCP client at runtime
 - Credentials stay in Action Gateway Connections — not in agent `env`

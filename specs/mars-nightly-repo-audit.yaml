@@ -1,5 +1,9 @@
 # Shop MARS pin — Nightly Repo Audit (Wave 1 AG: GitHub draft PR)
-# No real secrets in this file. Connections hold GitHub OAuth.
+# No real secrets in this file.
+# GITHUB_TOKEN pushes the cleanup branch. The Action Gateway GitHub
+# Connection opens the pull request.
+# Interactive sessions keep permissions.default: ask. A cron trigger
+# rejects that default; use specs/mars-nightly-repo-audit-trigger.yaml.
 name: mars-nightly-repo-audit
 agent: langgraph
 template: langgraph
@@ -12,6 +16,8 @@ env:
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
 secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+  # Required. Contents write on the repo named in chat. Pass with --secret.
+  GITHUB_TOKEN: "<github-pat-with-contents-write>"
 # Action Gateway — full catalog via do.actions; graph uses action_invoke → github_create_pull_request
 tools:
   - do.actions
