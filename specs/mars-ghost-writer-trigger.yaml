@@ -1,0 +1,24 @@
+# Scheduled publish spec for Ghost Writer.
+# No real secrets in this file. Pass the inference key and BLOG_* values
+# with --secret when you create the trigger.
+# Harness rejects permissions.default: ask on a trigger, so this copy
+# allows tools. The trigger prompt __GW_PUBLISH__ publishes without a
+# confirmation step.
+name: mars-ghost-writer
+agent: langgraph
+template: langgraph
+size: mv-2vcpu-4gb
+env:
+  FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"
+  FRAMEWORK_REPO_SHA: "<exact-commit-sha>"
+  FRAMEWORK_SUBDIR: "mars-ghost-writer"
+  HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
+  HARNESS_INFERENCE_MODEL: deepseek-v4-pro
+  BLOG_TOPIC: "AI, Cloud Computing, DevOps"
+secrets:
+  HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+  BLOG_TYPE: "ghost"
+  BLOG_URL: "https://myblog.com"
+  BLOG_API_KEY: "<ghost-id:secret or wp-user:app_password>"
+permissions:
+  default: allow

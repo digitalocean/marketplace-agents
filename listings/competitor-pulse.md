@@ -24,6 +24,14 @@ Ideal for weekly competitive reviews, launch-week monitoring, pricing and positi
 - Chat-native: name companies in plain language to build a watchlist
 - Built for DigitalOcean Managed Agents (MARS) with a sandboxed LangGraph runtime
 
+### Getting Started
+
+1. Create the agent with your inference API key. No other secrets are needed. The agent reads public pages only, so it needs network access to the sites you track.
+2. Start a session and send `Track OpenAI, Anthropic, and Google` (or `track fedex`). Well-known names resolve to their public URLs right away; less common names use the inference model to find a site. The first run reads each competitor's site, pricing, changelog, and careers pages and replies with **First look — baseline established** plus a plain-English summary of each page. If it cannot match a name, it asks you to name specific companies instead of guessing.
+3. To get a notify ask, mention it in the request: `Track Cursor and alert on Slack`. When the run finds a material change, it pauses at **Notify about competitor changes?** with the change count, highlights, and a notify draft. Choose **Send notify** or **Quiet — keep brief**. In this version, Send notify records the notify in the run; it does not post to Slack or email yet. First looks and quiet runs never ask.
+
+Send `what do you do?` at any time for a short explanation of tracking, baselines, and notify.
+
 ### Requirements
 
 - DigitalOcean Managed Agents / Harness Runtime (sandboxed LangGraph session)
