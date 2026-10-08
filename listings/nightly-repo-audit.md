@@ -1,3 +1,5 @@
+logo: https://github.com/digitalocean/marketplace-agents/raw/main/listings/assets/nightly-repo-audit.svg
+
 # Nightly Repo Audit
 
 ## Summary

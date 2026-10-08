@@ -97,9 +97,11 @@ Full doctl notes: [DOCTL.md](./DOCTL.md).
 
 ### 3. Marketplace listing markdown
 
-Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary`, `description`, and `gettingStarted`. Follow the existing four files:
+Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary`, `description`, `gettingStarted`, and optional `logoUrl`. Follow the existing four files:
 
 ```markdown
+logo: https://example.com/your-agent-logo.png
+
 # Display Name
 
 ## Summary
@@ -123,7 +125,15 @@ Setup and first-run steps. Include this section only when the agent needs them.
 - …
 ```
 
+Optional `logo:` line at the **top** of the file (before the `#` display-name heading). When present, store the URL as `customData.logoUrl` and do not include it in `summary`, `description`, or `gettingStarted`. Host assets under [`listings/assets/`](./listings/assets/) when the logo lives in this repo (use a `raw.githubusercontent.com` or GitHub `raw/main` URL pinned to this monorepo).
+
 `### Getting Started` is optional. When it is present, store its body as `customData.gettingStarted` (a string) and leave that section out of `description`. Omit `gettingStarted` when the listing has no Getting Started section.
+
+Parse a listing file into Vendor Portal string fields with:
+
+```bash
+python3 scripts/listing_fields.py listings/<slug>.md
+```
 
 Do **not** put local install paths, fixture smoke recipes, or “PLATFORM blockers” in this file — keep those in the package `README.md`.
 
@@ -136,7 +146,7 @@ Wire the new row into the root [README.md](./README.md) agent table when you ope
 - [ ] `langgraph.json` registers **`agent`**
 - [ ] `requirements.txt` uses `-e ./mars-<slug>/`
 - [ ] `specs/mars-<slug>.yaml` present and doctl-createable
-- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
+- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; optional top `logo:` → `customData.logoUrl`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
 - [ ] Tests / smoke pass; PR merged (or SHA agreed) for the pin you will publish
 
 ---
@@ -174,6 +184,7 @@ Notes from production use:
     { "name": "Your Name", "email": "you@digitalocean.com" }
   ],
   "customData": {
+    "logoUrl": "<optional; from listings/<slug>.md top logo: line>",
     "summary": "<from listings/<slug>.md ## Summary>",
     "description": "<from listings/<slug>.md ## Description through Requirements, excluding ### Getting Started>",
     "gettingStarted": "<string; from listings/<slug>.md ### Getting Started, only when that section is present>",
@@ -238,7 +249,7 @@ Optional: add more `envDefaults` / `secretSlots` when the agent needs them (see 
 1. `GET /apps` — find `current` (and any `unpublished` pending version).
 2. If latest is `pending` or `inReview`, **stop** until that version is resolved.
 3. `GET /apps/{appId}/versions/{version}` for the approved current version.
-4. Merge: refresh `summary`, `description`, and `gettingStarted` (when the listing has a Getting Started section) from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
+4. Merge: refresh `logoUrl` (when present), `summary`, `description`, and `gettingStarted` (when the listing has a Getting Started section) from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
 5. `PUT` with `reasonForUpdate` set.
 6. Hand off to Marketplace for review if the new version is not yet live.
 
