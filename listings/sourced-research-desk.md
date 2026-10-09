@@ -1,3 +1,5 @@
+logo: https://github.com/digitalocean/marketplace-agents/raw/main/listings/assets/research-desk.svg
+
 # Sourced Research Desk
 
 ## Summary
