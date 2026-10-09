@@ -53,6 +53,7 @@ env.bak/
 venv.bak/
 
 # Editors and OS
+.cursor/
 .idea/
 .vscode/
 *.swp
