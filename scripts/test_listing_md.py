@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from listing_md import parse_listing_md
+from listing_md import listing_fields_to_custom_data, logo_asset_path, parse_listing_md
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LISTINGS = REPO_ROOT / "listings"
@@ -22,6 +22,15 @@ class ParseListingMdTests(unittest.TestCase):
         self.assertNotIn("Getting Started", fields.description.split("###")[0])
         self.assertIn("GITHUB_TOKEN", fields.getting_started or "")
         self.assertNotIn("doctl harness-runtime triggers create", fields.description)
+
+    def test_custom_data_excludes_logo_url(self) -> None:
+        path = LISTINGS / "competitor-pulse.md"
+        fields = parse_listing_md(path.read_text(encoding="utf-8"))
+        custom = listing_fields_to_custom_data(fields)
+        self.assertNotIn("logoUrl", custom)
+        self.assertNotIn("icon", custom)
+        asset = logo_asset_path(fields, REPO_ROOT)
+        self.assertEqual(asset, REPO_ROOT / "listings" / "assets" / "competitor-pulse.svg")
 
     def test_logo_line_stripped_from_body(self) -> None:
         text = """logo: https://example.com/icon.png

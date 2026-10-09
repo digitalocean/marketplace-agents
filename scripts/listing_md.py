@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 _LOGO_RE = re.compile(r"^logo:\s*(\S+)\s*$", re.IGNORECASE)
+_LOGO_ASSET_RE = re.compile(
+    r"listings/assets/([^/?#\s]+\.(?:svg|png))", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -60,16 +64,29 @@ def parse_listing_md(text: str) -> ListingFields:
 
 
 def listing_fields_to_custom_data(fields: ListingFields) -> dict[str, str]:
-    """Map parsed fields to Vendor Portal customData string keys."""
+    """Map parsed fields to Vendor Portal customData string keys for JSON PUT/POST.
+
+    Catalog logos are not set here — upload SVG/PNG via PUT .../logo; VP stores
+    the CDN URL on customData.icon.
+    """
     out: dict[str, str] = {
         "summary": fields.summary,
         "description": fields.description,
     }
-    if fields.logo_url:
-        out["logoUrl"] = fields.logo_url
     if fields.getting_started:
         out["gettingStarted"] = fields.getting_started
     return out
+
+
+def logo_asset_path(fields: ListingFields, repo_root: Path) -> Optional[Path]:
+    """Resolve local listings/assets/* file referenced by the top logo: line."""
+    if not fields.logo_url:
+        return None
+    match = _LOGO_ASSET_RE.search(fields.logo_url)
+    if not match:
+        return None
+    path = repo_root / "listings" / "assets" / match.group(1)
+    return path if path.is_file() else None
 
 
 def _split_h2_sections(body: str) -> dict[str, str]:

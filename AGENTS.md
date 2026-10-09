@@ -22,6 +22,18 @@ For running agents on MARS **without** Marketplace, see [DOCTL.md](./DOCTL.md).
 
 5. Emergency contact (name + email) for the listing — required on create and full update
 
+### Cursor skills (repeatable workflows)
+
+Step-by-step skills for bootstrap, Vendor Portal create/update, and listing logos live under [`skills/`](./skills/). Install into Cursor:
+
+```bash
+chmod +x scripts/install-cursor-skills.sh   # once
+./scripts/install-cursor-skills.sh           # ~/.cursor/skills/
+./scripts/install-cursor-skills.sh --project # .cursor/skills/ (relative symlinks in-repo)
+```
+
+See [`skills/README.md`](./skills/README.md) for the skill index. [AGENTS.md](./AGENTS.md) remains the canonical reference; skills operationalize these sections.
+
 ---
 
 ## Bootstrap a new agent
@@ -97,7 +109,7 @@ Full doctl notes: [DOCTL.md](./DOCTL.md).
 
 ### 3. Marketplace listing markdown
 
-Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary`, `description`, `gettingStarted`, and optional `logoUrl`. Follow the existing four files:
+Add catalog copy at [`listings/<slug>.md`](./listings/). This is the source for Vendor Portal `summary`, `description`, `gettingStarted`, and the repo-side logo asset reference (`logo:` line). Follow the existing four files:
 
 ```markdown
 logo: https://example.com/your-agent-logo.png
@@ -125,7 +137,11 @@ Setup and first-run steps. Include this section only when the agent needs them.
 - …
 ```
 
-Optional `logo:` line at the **top** of the file (before the `#` display-name heading). When present, store the URL as `customData.logoUrl` and do not include it in `summary`, `description`, or `gettingStarted`. Host assets under [`listings/assets/`](./listings/assets/) when the logo lives in this repo (use a `raw.githubusercontent.com` or GitHub `raw/main` URL pinned to this monorepo).
+Optional `logo:` line at the **top** of the file (before the `#` display-name heading). It points at the SVG/PNG under [`listings/assets/`](./listings/assets/) (GitHub `raw/main` or pinned commit URL). It is **not** sent on JSON create/update — upload the file with `PUT .../logo` so Vendor Portal sets **`customData.icon`** on the marketplace assets CDN. Do not include the logo in `summary`, `description`, or `gettingStarted`.
+
+```bash
+python3 scripts/upload_listing_logo.py <appId> listings/<slug>.md --verify
+```
 
 `### Getting Started` is optional. When it is present, store its body as `customData.gettingStarted` (a string) and leave that section out of `description`. Omit `gettingStarted` when the listing has no Getting Started section.
 
@@ -146,7 +162,7 @@ Wire the new row into the root [README.md](./README.md) agent table when you ope
 - [ ] `langgraph.json` registers **`agent`**
 - [ ] `requirements.txt` uses `-e ./mars-<slug>/`
 - [ ] `specs/mars-<slug>.yaml` present and doctl-createable
-- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; optional top `logo:` → `customData.logoUrl`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
+- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; optional top `logo:` + asset under `listings/assets/` uploaded via logo PUT → `customData.icon`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
 - [ ] Tests / smoke pass; PR merged (or SHA agreed) for the pin you will publish
 
 ---
@@ -163,6 +179,7 @@ Listing type: **`mars-agent`** (not `agent`, not `droplet`)
 | Get by version | `GET` | `/apps/{appId}/versions/{version}` |
 | Create | `POST` | `/apps` |
 | Full update | `PUT` | `/apps/{appId}/versions/{version}` |
+| Upload logo | `PUT` | `/apps/{appId}/versions/{version}/logo` (multipart `rawImage`; sets `customData.icon`) |
 
 Notes from production use:
 
@@ -184,7 +201,6 @@ Notes from production use:
     { "name": "Your Name", "email": "you@digitalocean.com" }
   ],
   "customData": {
-    "logoUrl": "<optional; from listings/<slug>.md top logo: line>",
     "summary": "<from listings/<slug>.md ## Summary>",
     "description": "<from listings/<slug>.md ## Description through Requirements, excluding ### Getting Started>",
     "gettingStarted": "<string; from listings/<slug>.md ### Getting Started, only when that section is present>",
@@ -244,14 +260,21 @@ Notes from production use:
 
 Optional: add more `envDefaults` / `secretSlots` when the agent needs them (see Ghost Writer’s blog vars).
 
+After create (or when adding a logo), upload catalog art — JSON bodies do **not** persist `logoUrl`:
+
+```bash
+python3 scripts/upload_listing_logo.py <appId> listings/<slug>.md
+```
+
 ### Update flow
 
 1. `GET /apps` — find `current` (and any `unpublished` pending version).
 2. If latest is `pending` or `inReview`, **stop** until that version is resolved.
 3. `GET /apps/{appId}/versions/{version}` for the approved current version.
-4. Merge: refresh `logoUrl` (when present), `summary`, `description`, and `gettingStarted` (when the listing has a Getting Started section) from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
+4. Merge: refresh `summary`, `description`, and `gettingStarted` (when the listing has a Getting Started section) from `listings/<slug>.md`, bump SHA, keep/adjust `showOnCatalog`, preserve agent fields you are not changing.
 5. `PUT` with `reasonForUpdate` set.
-6. Hand off to Marketplace for review if the new version is not yet live.
+6. If the listing markdown or `listings/assets/` logo changed, `PUT .../logo` (see **upload_listing_logo.py**) so `customData.icon` updates.
+7. Hand off to Marketplace for review if the new version is not yet live.
 
 ### Existing listings in this monorepo
 
