@@ -4,7 +4,7 @@ LangGraph agents shaped for DigitalOcean MARS (Managed Agents / Harness Runtime)
 
 Each agent lives in its own subdirectory. Pin with the same `FRAMEWORK_REPO` + `FRAMEWORK_REPO_SHA` and set `FRAMEWORK_SUBDIR` to the agent folder.
 
-**Adding or listing a new agent for the Marketplace:** see **[AGENTS.md](./AGENTS.md)**.
+**Adding or listing a new agent for the Marketplace:** see **[AGENTS.md](./AGENTS.md)**. Repeatable Cursor workflows: [skills/README.md](./skills/README.md) (`./scripts/install-cursor-skills.sh`).
 
 | Subdir | Agent |
 |--------|--------|
