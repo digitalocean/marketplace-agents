@@ -33,7 +33,10 @@ def resolve_llm_env() -> dict[str, str | None]:
         or os.environ.get("OPENAI_MODEL")
         or DEFAULT_MODEL
     )
-    return {"base_url": base_url, "api_key": api_key, "model": model}
+    # Secrets passed with ``doctl --secret NAME=@file`` keep the file's trailing
+    # newline; an unstripped key makes an invalid Authorization header.
+    strip = lambda v: v.strip() if isinstance(v, str) else v  # noqa: E731
+    return {"base_url": strip(base_url), "api_key": strip(api_key), "model": strip(model)}
 
 
 def harness_env_available() -> bool:

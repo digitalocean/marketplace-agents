@@ -51,3 +51,8 @@ def test_fallback_reason_recorded(monkeypatch):
     monkeypatch.setattr(requests, "post", boom)
     llm.chat_completion("s", "u")
     assert llm.last_error() == "ConnectionError"
+
+
+def test_key_from_file_newline_is_stripped(monkeypatch):
+    monkeypatch.setenv("HARNESS_INFERENCE_API_KEY", "abc\n")
+    assert resolve_llm_env()["api_key"] == "abc"
