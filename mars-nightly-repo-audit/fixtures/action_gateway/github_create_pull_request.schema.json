@@ -1,0 +1,46 @@
+{
+  "name": "github_create_pull_request",
+  "title": "Create GitHub Pull Request",
+  "description": "Create a new pull request in a GitHub repository.",
+  "inputSchema": {
+    "properties": {
+      "base": {
+        "description": "Branch to merge into.",
+        "type": "string"
+      },
+      "body": {
+        "description": "Pull request body/description.",
+        "type": "string"
+      },
+      "draft": {
+        "description": "Create as a draft pull request.",
+        "type": "boolean"
+      },
+      "head": {
+        "description": "Branch with changes (user:branch for cross-repo).",
+        "type": "string"
+      },
+      "owner": {
+        "description": "Repository owner (user or organization).",
+        "type": "string"
+      },
+      "repo": {
+        "description": "Repository name.",
+        "type": "string"
+      },
+      "title": {
+        "description": "Pull request title.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "owner",
+      "repo",
+      "title",
+      "head",
+      "base"
+    ],
+    "type": "object"
+  },
+  "score": 0.886211395
+}

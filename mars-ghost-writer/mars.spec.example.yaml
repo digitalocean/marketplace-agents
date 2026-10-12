@@ -4,7 +4,6 @@ name: mars-ghost-writer
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb
-persistent_workspace: true
 
 env:
   FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"

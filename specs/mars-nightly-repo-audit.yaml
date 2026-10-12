@@ -1,8 +1,13 @@
+# Shop MARS pin — Nightly Repo Audit (Wave 1 AG: GitHub draft PR)
+# No real secrets in this file.
+# GITHUB_TOKEN pushes the cleanup branch. The Action Gateway GitHub
+# Connection opens the pull request.
+# Interactive sessions keep permissions.default: ask. A cron trigger
+# rejects that default; use specs/mars-nightly-repo-audit-trigger.yaml.
 name: mars-nightly-repo-audit
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb
-persistent_workspace: true
 env:
   FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"
   FRAMEWORK_REPO_SHA: "<exact-commit-sha>"
@@ -11,5 +16,14 @@ env:
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
 secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+  # Required. Contents write on the repo named in chat. Pass with --secret.
+  GITHUB_TOKEN: "<github-pat-with-contents-write>"
+# Action Gateway — full catalog via do.actions; graph uses action_invoke → github_create_pull_request
+tools:
+  - do.actions
 permissions:
   default: ask
+  rules:
+    # Graph HITL is the human gate. Gateway MCP has no in-band ask — allow MCP after approve.
+    - tool: mcp
+      action: allow

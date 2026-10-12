@@ -1,0 +1,26 @@
+# Daily cron spec for Nightly Repo Audit.
+# No real secrets in this file. Pass GITHUB_TOKEN and the inference key
+# with --secret when you create the trigger.
+# Harness rejects permissions.default: ask on a trigger, so this copy
+# allows tools. The graph still stops for "Start repo audit?" and
+# "Open cleanup PR?"; approve those in the session.
+name: mars-nightly-repo-audit
+agent: langgraph
+template: langgraph
+size: mv-2vcpu-4gb
+env:
+  FRAMEWORK_REPO: "https://github.com/digitalocean/marketplace-agents.git"
+  FRAMEWORK_REPO_SHA: "<exact-commit-sha>"
+  FRAMEWORK_SUBDIR: "mars-nightly-repo-audit"
+  HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
+  HARNESS_INFERENCE_MODEL: deepseek-v4-pro
+secrets:
+  HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
+  GITHUB_TOKEN: "<github-pat-with-contents-write>"
+tools:
+  - do.actions
+permissions:
+  default: allow
+  rules:
+    - tool: mcp
+      action: allow

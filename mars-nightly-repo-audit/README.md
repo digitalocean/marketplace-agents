@@ -5,16 +5,18 @@ Trigger → sandbox audit slice → one cleanup PR draft → ask before open. La
 ## What it does
 
 - Plans a nightly audit slice (path/theme) for one repo
-- Scans an in-repo fixture sandbox (v1) for hygiene findings (TODO/FIXME, unused legacy)
-- Drafts cleanup PR metadata (branch, title, body, diff_stat)
+- Reads `owner/name` or a `https://github.com/owner/name` URL from chat, then clones that ref
+- Scans the clone for hygiene findings (TODO/FIXME, unused legacy). A `fixture_path` payload still scans `fixtures/sample_repo`
+- Deletes unused legacy files and comment-only TODO/FIXME lines, commits them, and pushes `nightly/cleanup-<area>` before asking
 - Stops for human approval before opening a PR
+- **On Approve:** opens a **real draft PR** on GitHub via Action Gateway when a GitHub Connection is available
 
 ## What it does not (v1)
 
 - Auto-merge or force-push
-- Real GitHub `gh` / API open (act stubs PR metadata in state only)
 - Multi-repo fleet audits or product feature rewrites
 - Presenting Approve when findings are empty or checkout is blocked
+- Opening a GitHub PR when Action Gateway / GitHub Connection is missing (fixture path stays metadata-only and does not push)
 
 ## Run flow
 
@@ -30,7 +32,7 @@ When the graph reaches **ask**, the run pauses until you **Open draft PR** (`app
 
 | If you… | Resume | The agent will… |
 |---------|--------|-----------------|
-| **Open draft PR** | `approve` | Stub-open PR metadata in state (`status: opened`, `pr_title` / `pr_body_md`; no real GitHub in v1) |
+| **Open draft PR** | `approve` | Open a **draft** PR via Action Gateway + GitHub Connection when configured (`status: opened`, real `pr_url` / number when AG succeeds). Without AG/GitHub, records metadata only and reports that open was unavailable. |
 | **Discard** | `deny` | Keep artifacts; skip the side effect; finish with status `denied` |
 
 You will see: **Open cleanup PR?** plus branch, title, scope, diff_stat, what-it-does bullets, what-it-will-not-do, and an evidence line.
@@ -38,11 +40,11 @@ You will see: **Open cleanup PR?** plus branch, title, scope, diff_stat, what-it
 ### Ask body (shape)
 
 ```text
-Open a draft PR on {owner/repo}?
+Want me to open a draft PR on {owner/repo}?
 
-Branch:  {branch_name}
-Title:   {pr_title}
-Scope:   {area}
+Branch: {branch_name}
+Title: {pr_title}
+Scope: {area}
 Changes: {diff_stat}
 
 What it does:
@@ -50,10 +52,12 @@ What it does:
 
 What it will not do:
 - Merge
+- Force-push
 - Touch paths outside {area}
 - Change product behavior (cleanup / hygiene only)
 
-Evidence: findings + diff are in this run's artifacts.
+Evidence is in this run's artifacts.
+When Action Gateway + GitHub Connection are available, Approve opens a real draft PR (not a merge).
 ```
 
 ## Run on DigitalOcean MARS
@@ -63,14 +67,16 @@ Evidence: findings + diff are in this run's artifacts.
 - DigitalOcean account with Managed Agents / MARS access (Private Preview as applicable)
 - This repo public on GitHub (MARS pins a SHA)
 - Inference available via harness env (see below)
+- For real PR open: Action Gateway enabled, a GitHub Connection on the agent, and `GITHUB_TOKEN` or `GH_TOKEN` with contents write so the branch can be pushed before Approve
 
 **Pin**
 
 1. Create or open a MARS agent environment that accepts a LangGraph Agent Server app.
 2. Point it at this GitHub repo; pin commit SHA `{sha}`.
 3. Ensure root `langgraph.json` is detected (graph export via module-level `.compile(name="NightlyRepoAudit")`).
-4. Set harness inference env (names below). Do not hardcode keys in the repo.
-5. Deploy / start the agent server; run one smoke invoke (see Smoke).
+4. Set harness inference env (names below) and the required secret `GITHUB_TOKEN` (contents write). Do not hardcode keys in the repo.
+5. Attach GitHub Connection / Action Gateway so Approve can open draft PRs.
+6. Deploy / start the agent server; run one smoke invoke (see Smoke).
 
 See `mars.spec.example.yaml` for `FRAMEWORK_REPO` / `FRAMEWORK_REPO_SHA` placeholders.
 
@@ -86,8 +92,14 @@ Fallbacks `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` are OK if docume
 
 **Permissions / tools**
 
-- v1 operates on in-repo `fixtures/sample_repo/` (deterministic filesystem scan)
-- `open_pr` is stubbed — records intent in state only; no Action Gateway / `gh` required for local proof
+- Chat names the repo (`https://github.com/owner/name` or `owner/name`). Gather shallow-clones that ref. `fixture_path` still scans `fixtures/sample_repo` and does not push
+- On a clone, draft commits safe cleanup and pushes the branch, then ask runs. Approve calls Action Gateway
+- MARS `open_pr` uses Action Gateway (`do.actions`) via MCP `action_invoke` → `github_create_pull_request` (`draft: true`) after HITL approve
+- Push auth is the required secret `GITHUB_TOKEN` (or `GH_TOKEN`) with contents write. The Action Gateway GitHub Connection is still what opens the pull request
+- Daily cron: `specs/mars-nightly-repo-audit-trigger.yaml` (`permissions.default: allow`). A trigger rejects the interactive spec because its default is `ask`. The run still pauses for the plan confirm and the open-PR ask. See the listing Getting Started for the `doctl harness-runtime triggers create` command.
+- Spec: `tools: [do.actions]` + `permissions.rules` mcp allow (see `mars.spec.example.yaml`)
+- Platform injects `HARNESS_MCP_SERVERS` (base64 JSON) with `do_actions` VPC URL; graph binds MCP client at runtime
+- Credentials stay in Action Gateway Connections — not in agent `env`
 - Optional live LLM planning when harness key present (offline path needs no key)
 
 ## Smoke
@@ -117,10 +129,11 @@ Expect:
 
 1. Stages through `draft` without side effects.
 2. An **ask** interrupt when findings exist; or a clean `empty` / `blocked` report with no ask.
-3. After Approve: stub PR evidence (`status: opened`, `pr_url` stub, `pr_title` / `pr_body_md`).
-4. After Deny: `status: denied` and no PR metadata.
+3. After Approve (AG + GitHub connected): real draft PR evidence (`status: opened`, `pr_url`, `pr_title` / `pr_body_md`).
+4. After Approve without AG: honest unavailable / metadata-only outcome (no fake GitHub URL).
+5. After Deny: `status: denied` and no PR opened.
 
-Local smoke (fixtures, no API key):
+Local smoke (fixtures, no API key, no AG):
 
 ```bash
 python scripts/smoke_invoke.py
@@ -139,7 +152,7 @@ pytest -q
 python scripts/smoke_invoke.py
 ```
 
-MARS path stays primary; local is for graph tests. Without an API key, the fixture scan path is fully deterministic.
+MARS path stays primary for real PR open; local is for graph tests. Without an API key, the fixture scan path is fully deterministic.
 
 ## License
 
