@@ -9,6 +9,7 @@ import re
 
 _EMDASH_RE = re.compile(r"\s*[—–]\s*")
 _RANGE_DASH_RE = re.compile(r"(\d)\s*[–—]\s*([$€£]?\d)")
+_WORD_RANGE_RE = re.compile(r"(\w)[–—](\w)")
 _DOUBLE_HYPHEN_RE = re.compile(r"\s+--\s+")
 _DOUBLED_COMMA_RE = re.compile(r",\s*,+")
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*\n?.*?```", re.DOTALL | re.IGNORECASE)
@@ -30,7 +31,8 @@ def hygiene_text(text: str, *, preserve_markdown: bool = True) -> str:
 
     out = text
     out = _FENCED_JSON_RE.sub("", out)
-    out = _RANGE_DASH_RE.sub(r"\1-\2", out)  # keep numeric ranges (60–120 -> 60-120)
+    out = _RANGE_DASH_RE.sub(r"\1-\2", out)
+    out = _WORD_RANGE_RE.sub(r"\1 to \2", out)  # June–November -> June to November  # keep numeric ranges (60–120 -> 60-120)
     out = _EMDASH_RE.sub(", ", out)
     out = _DOUBLE_HYPHEN_RE.sub(", ", out)
     out = _DOUBLED_COMMA_RE.sub(", ", out)

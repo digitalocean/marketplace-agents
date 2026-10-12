@@ -8,3 +8,7 @@ def test_numeric_ranges_kept():
 
 def test_prose_dash_replaced():
     assert hygiene_text("Maui — great") == "Maui, great"
+
+
+def test_word_ranges_become_to():
+    assert hygiene_text("June–November and April–early June") == "June to November and April to early June"
