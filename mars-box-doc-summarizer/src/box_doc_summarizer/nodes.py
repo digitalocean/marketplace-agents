@@ -1,0 +1,601 @@
+"""Stage nodes: intake → connect → inventory → extract → brief → links → synthesize → ask → write_back → report."""
+
+from __future__ import annotations
+
+import os
+import re
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage
+
+from box_doc_summarizer import box_api, box_mount
+from box_doc_summarizer.extractors import extract_bytes, is_supported
+from box_doc_summarizer.hygiene import hygiene_text
+from box_doc_summarizer.intent import classify_intent, parse_folder_id
+from box_doc_summarizer.llm import chat_completion, harness_env_available, parse_json_object
+from box_doc_summarizer.persona import (
+    BRIEF_INSTRUCTIONS,
+    SYNTH_INSTRUCTIONS,
+    SYSTEM_PROMPT,
+    ask_body,
+    ask_title,
+    blocked_message,
+    denied_message,
+    empty_message,
+    help_message,
+    missing_folder_message,
+    welcome_message,
+    write_failed_message,
+    written_message,
+)
+from box_doc_summarizer.state import SummarizerState
+
+ASSISTANT_DISPLAY_NAME = "Box Doc Summarizer"
+_CONFLICT_RE = re.compile(r"(\(conflict|conflicted copy|\(\d+\)\.\w+$)", re.I)
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
+def summary_filename() -> str:
+    return os.environ.get("SUMMARY_FILENAME", "EXECUTIVE-SUMMARY.md")
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _append(state: SummarizerState, line: str) -> list[str]:
+    return [*(state.get("stage_summaries") or []), line]
+
+
+def _human_text(messages: list[Any] | None) -> str:
+    for msg in reversed(messages or []):
+        if isinstance(msg, HumanMessage):
+            return msg.content if isinstance(msg.content, str) else str(msg.content)
+        if isinstance(msg, dict) and (msg.get("type") or msg.get("role") or "").lower() in {"human", "user"}:
+            return str(msg.get("content") or "")
+    return ""
+
+
+def _reply(text: str) -> dict[str, Any]:
+    return {"messages": [AIMessage(content=hygiene_text(text or ""), name=ASSISTANT_DISPLAY_NAME)]}
+
+
+def _normalize_decision(raw: Any) -> str:
+    if isinstance(raw, dict):
+        if "approved" in raw:
+            return "approve" if raw.get("approved") else "deny"
+        raw = raw.get("decision") or raw.get("value") or raw.get("choice") or "deny"
+    if isinstance(raw, bool):
+        return "approve" if raw else "deny"
+    s = str(raw).strip().lower()
+    return "approve" if s in {"approve", "approved", "yes", "y", "ok", "okay", "true"} else "deny"
+
+
+def _mars_node(fn):
+    def wrapped(state):
+        out = fn(state)
+        return {k: v for k, v in (out or {}).items() if k != "human_summary"} if out else out
+
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
+def _skip_name(name: str) -> str:
+    parts = name.split("/")
+    base = parts[-1]
+    if any(p.startswith(".") for p in parts) or base.startswith("~$"):
+        return "hidden or temp file"
+    if base == summary_filename():
+        return "our own summary"
+    if _CONFLICT_RE.search(base):
+        return "Box conflict copy"
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# intake
+# ---------------------------------------------------------------------------
+
+
+def intake(state: SummarizerState) -> dict[str, Any]:
+    text = _human_text(state.get("messages"))
+    fixture = (state.get("fixture_path") or "").strip()
+    folder_id = (state.get("folder_id") or "").strip()
+
+    if fixture or folder_id:
+        intent = "summarize"
+    else:
+        intent = classify_intent(text)
+        folder_id = parse_folder_id(text)
+
+    if intent == "help":
+        return {"intent": "help", "status": "help", **_reply(help_message())}
+    if intent == "chat":
+        reply = None
+        if text.strip() and harness_env_available() and len(text.split()) > 2:
+            reply = chat_completion(SYSTEM_PROMPT, text, max_tokens=300)
+        return {"intent": "chat", "status": "chat", **_reply(reply or welcome_message())}
+
+    folder_id = folder_id or os.environ.get("BOX_FOLDER_ID", "").strip()
+    if not folder_id and not fixture:
+        return {"intent": "chat", "status": "chat", **_reply(missing_folder_message())}
+
+    return {
+        "intent": "summarize",
+        "folder_id": folder_id,
+        "fixture_path": fixture,
+        "documents": [],
+        "skipped": [],
+        "stage_summaries": _append(state, f"intake: folder {folder_id or 'fixture'}"),
+    }
+
+
+def route_after_intake(state: SummarizerState) -> str:
+    return "connect" if state.get("intent") == "summarize" else "end"
+
+
+# ---------------------------------------------------------------------------
+# connect (fixture | optional Box Mount | Box API)
+# ---------------------------------------------------------------------------
+
+
+def connect(state: SummarizerState) -> dict[str, Any]:
+    fixture = state.get("fixture_path") or ""
+    folder_id = state.get("folder_id") or ""
+    if fixture:
+        root = Path(fixture)
+        if not root.is_dir():
+            return {"status": "blocked", "blocked_reason": f"fixture folder {fixture} not found", "mount_state": "skipped"}
+        return {
+            "source_mode": "fixture",
+            "local_root": str(root),
+            "folder_name": root.name,
+            "folder_url": box_api.folder_url(folder_id) if folder_id else root.resolve().as_uri(),
+            "mount_state": "skipped",
+            "stage_summaries": _append(state, "connect: fixture"),
+        }
+
+    folder_name, folder_link = f"Box folder {folder_id}", box_api.folder_url(folder_id)
+    if box_mount.mount_enabled():
+        res = box_mount.ensure_mount(folder_id)
+        if not res.ok:
+            if not box_api.box_api_configured():
+                return {"status": "blocked", "blocked_reason": f"Box Mount: {res.message}", "mount_state": res.state}
+            mount_fail = res
+        else:
+            mount_fail = None
+    else:
+        mount_fail = None
+        res = None
+    if res is not None and mount_fail is None:
+        if box_api.box_api_configured():
+            try:
+                f = box_api.get_box_client().get_folder(folder_id)
+                folder_name, folder_link = f.name, f.url
+            except Exception:  # noqa: BLE001
+                pass
+        return {
+            "source_mode": "mount",
+            "local_root": res.path,
+            "folder_name": folder_name,
+            "folder_url": folder_link,
+            "mount_state": res.state,
+            "stage_summaries": _append(state, f"connect: box mount {res.state}"),
+        }
+
+    mount_state = f"failed: {mount_fail.message}"[:200] if mount_fail else "skipped"
+    if not box_api.box_api_configured():
+        return {"status": "blocked", "blocked_reason": "BOX_JWT_CONFIG_JSON is not set.", "mount_state": "skipped"}
+    try:
+        folder = box_api.get_box_client().get_folder(folder_id)
+    except Exception as exc:  # noqa: BLE001
+        reason = str(exc)[:300]
+        if mount_fail:
+            reason = f"Box Mount: {mount_fail.message}. Box API fallback: {reason}"[:400]
+        return {"status": "blocked", "blocked_reason": reason, "mount_state": mount_state}
+    return {
+        "source_mode": "api",
+        "folder_name": folder.name,
+        "folder_url": folder.url,
+        "mount_state": mount_state,
+        "stage_summaries": _append(state, "connect: box api"),
+    }
+
+
+def route_after_connect(state: SummarizerState) -> str:
+    return "report" if state.get("status") == "blocked" else "inventory"
+
+
+# ---------------------------------------------------------------------------
+# inventory
+# ---------------------------------------------------------------------------
+
+
+def inventory(state: SummarizerState) -> dict[str, Any]:
+    max_files = _int_env("MAX_FILES", 50)
+    max_bytes = _int_env("MAX_FILE_BYTES", 25 * 1024 * 1024)
+    docs: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    existing_summary_id = ""
+
+    if state.get("source_mode") == "api":
+        try:
+            items = box_api.get_box_client().list_files(
+                state["folder_id"], max_depth=_int_env("MAX_DEPTH", 3), max_items=max_files * 4
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "blocked", "blocked_reason": str(exc)[:300]}
+        entries = [
+            {"path": i.path, "name": i.name, "file_id": i.id, "size": i.size, "modified": i.modified_at, "url": i.url}
+            for i in items
+        ]
+        for i in items:
+            if i.path == summary_filename():
+                existing_summary_id = i.id
+    else:
+        root = Path(state["local_root"])
+        entries = []
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root).as_posix()
+            if any(part.startswith(".") for part in rel.split("/")[:-1]):
+                continue
+            st = p.stat()
+            entries.append(
+                {
+                    "path": rel,
+                    "name": p.name,
+                    "file_id": "",
+                    "size": st.st_size,
+                    "modified": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+                    "url": "",
+                }
+            )
+
+    for e in sorted(entries, key=lambda x: x["path"].lower()):
+        reason = _skip_name(e["path"])
+        if not reason and e["size"] > max_bytes:
+            reason = "over size cap"
+        if not reason and len(docs) >= max_files:
+            reason = f"over MAX_FILES ({max_files})"
+        if reason:
+            skipped.append({**e, "reason": reason})
+            continue
+        e["supported"] = is_supported(e["name"])
+        docs.append(e)
+
+    if not docs:
+        return {"status": "empty", "documents": [], "skipped": skipped}
+    return {
+        "documents": docs,
+        "skipped": skipped,
+        "existing_summary_id": existing_summary_id,
+        "stage_summaries": _append(state, f"inventory: {len(docs)} docs, {len(skipped)} skipped"),
+    }
+
+
+def route_after_inventory(state: SummarizerState) -> str:
+    return "report" if state.get("status") in {"blocked", "empty"} else "extract"
+
+
+# ---------------------------------------------------------------------------
+# extract
+# ---------------------------------------------------------------------------
+
+
+def extract(state: SummarizerState) -> dict[str, Any]:
+    out: list[dict[str, Any]] = []
+    client = box_api.get_box_client() if state.get("source_mode") == "api" else None
+    root = Path(state.get("local_root") or ".")
+    for d in state.get("documents") or []:
+        d = dict(d)
+        if not d.get("supported"):
+            d.update(text="", note="metadata only (unsupported type)")
+            out.append(d)
+            continue
+        try:
+            data = client.download(d["file_id"]) if client else (root / d["path"]).read_bytes()
+            ex = extract_bytes(d["name"], data)
+            d.update(text=ex.text, supported=ex.supported, truncated=ex.truncated)
+            if ex.error:
+                d["note"] = f"could not read ({ex.error})"
+        except Exception as exc:  # noqa: BLE001
+            d.update(text="", supported=False, note=f"download failed ({str(exc)[:120]})")
+        out.append(d)
+    return {"documents": out, "stage_summaries": _append(state, "extract: done")}
+
+
+# ---------------------------------------------------------------------------
+# brief
+# ---------------------------------------------------------------------------
+
+_SENT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _strip_md(line: str) -> str:
+    return re.sub(r"[*_`>#]+", "", line).strip()
+
+
+def heuristic_brief(text: str) -> tuple[str, list[str]]:
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    headings = [_strip_md(ln) for ln in lines if ln.lstrip().startswith("#")]
+    paras: list[str] = []
+    buf: list[str] = []
+    for ln in lines + [""]:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            if buf:
+                paras.append(" ".join(buf))
+                buf = []
+            continue
+        if ln.lstrip()[:2] in {"- ", "* "}:
+            continue
+        buf.append(_strip_md(ln))
+    first = next((p for p in paras if len(p) > 40), paras[0] if paras else "")
+    brief = " ".join(_SENT_RE.split(first)[:2]).strip()
+    if not brief:
+        brief = "No readable prose in this document."
+    points = [h for h in headings[1:6] if h] if len(headings) > 1 else []
+    if not points:
+        points = [" ".join(_SENT_RE.split(p)[:1])[:160] for p in paras[1:4]]
+    return brief[:500], [p for p in points if p][:5]
+
+
+def brief(state: SummarizerState) -> dict[str, Any]:
+    use_llm = harness_env_available()
+    out: list[dict[str, Any]] = []
+    for d in state.get("documents") or []:
+        d = dict(d)
+        text = d.get("text") or ""
+        if not text:
+            d.update(brief=f"{d['name']}: {d.get('note') or 'no readable text'}.", key_points=[])
+        else:
+            parsed = None
+            if use_llm:
+                parsed = parse_json_object(
+                    chat_completion(SYSTEM_PROMPT, f"{BRIEF_INSTRUCTIONS}\n\nFile: {d['path']}\n\n{text[:12000]}")
+                )
+            if parsed and parsed.get("brief"):
+                d["brief"] = str(parsed["brief"]).strip()
+                d["key_points"] = [str(p).strip() for p in (parsed.get("key_points") or []) if str(p).strip()][:5]
+                d["brief_source"] = "llm"
+            else:
+                d["brief"], d["key_points"] = heuristic_brief(text)
+                d["brief_source"] = "heuristic"
+        d.pop("text", None)  # keep checkpoints small; text never needed again
+        out.append(d)
+    return {"documents": out, "stage_summaries": _append(state, f"brief: {len(out)} docs")}
+
+
+# ---------------------------------------------------------------------------
+# links
+# ---------------------------------------------------------------------------
+
+
+def links(state: SummarizerState) -> dict[str, Any]:
+    docs = [dict(d) for d in state.get("documents") or []]
+    note = ""
+    folder_url = state.get("folder_url") or ""
+    mode = state.get("source_mode")
+    folder_id = state.get("folder_id") or ""
+
+    if mode in {"fixture", "mount"} and folder_id and box_api.box_api_configured():
+        try:
+            items = {i.path: i for i in box_api.get_box_client().list_files(folder_id)}
+            for d in docs:
+                hit = items.get(d["path"])
+                if hit:
+                    d["file_id"], d["url"] = hit.id, hit.url
+        except Exception as exc:  # noqa: BLE001
+            note = f"Box link lookup failed ({str(exc)[:120]}); using folder links."
+
+    access = os.environ.get("BOX_SHARED_LINK_ACCESS", "").strip()
+    if access and mode == "api":
+        client = box_api.get_box_client()
+        for d in docs:
+            if d.get("file_id") and "app.box.com/file/" in (d.get("url") or ""):
+                try:
+                    url = client.ensure_shared_link(d["file_id"], access)
+                    if url:
+                        d["url"] = url
+                except Exception:  # noqa: BLE001
+                    note = note or "Some shared links could not be created; using app.box.com file links."
+
+    missing = 0
+    for d in docs:
+        if not d.get("url"):
+            missing += 1
+            if mode == "fixture" and not folder_id:
+                d["url"] = (Path(state["local_root"]) / d["path"]).resolve().as_uri()
+            else:
+                d["url"] = folder_url
+    if missing and not note and not (mode == "fixture" and not folder_id):
+        note = f"{missing} file link(s) point at the folder because Box file ids were not available."
+    return {"documents": docs, "links_note": note, "stage_summaries": _append(state, "links: done")}
+
+
+# ---------------------------------------------------------------------------
+# synthesize
+# ---------------------------------------------------------------------------
+
+_STOP = set(
+    "the a an and or of to in on for with is are be by at as it this that from your you our we can will "
+    "into each per more most best also over than about when what which while who where there their they "
+    "its it's not but all any one two have has was were these those".split()
+)
+
+
+def _heuristic_themes(docs: list[dict[str, Any]]) -> list[str]:
+    counts: Counter[str] = Counter()
+    for d in docs:
+        words = set(re.findall(r"[A-Za-z][A-Za-z'-]{3,}", f"{d.get('brief', '')} {' '.join(d.get('key_points') or [])}"))
+        counts.update(w.lower() for w in words if w.lower() not in _STOP)
+    common = [w for w, n in counts.most_common(12) if n > 1][:6]
+    return [f"{w.capitalize()} comes up across multiple documents." for w in common]
+
+
+def synthesize(state: SummarizerState) -> dict[str, Any]:
+    docs = state.get("documents") or []
+    folder_name = state.get("folder_name") or "Box folder"
+    folder_url = state.get("folder_url") or ""
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    tldr, themes = "", []
+    if harness_env_available():
+        joined = "\n\n".join(
+            f"[{d['path']}] {d.get('brief', '')}\n" + "\n".join(f"- {p}" for p in d.get("key_points") or [])
+            for d in docs
+        )
+        parsed = parse_json_object(chat_completion(SYSTEM_PROMPT, f"{SYNTH_INSTRUCTIONS}\n\n{joined[:24000]}", max_tokens=900))
+        if parsed:
+            tldr = str(parsed.get("tldr") or "").strip()
+            themes = [str(t).strip() for t in parsed.get("themes") or [] if str(t).strip()][:6]
+    if not tldr:
+        prose = [
+            d for d in docs
+            if d.get("brief") and d.get("supported") and d["name"].lower().rsplit(".", 1)[-1] in {"md", "txt", "docx", "pdf", "pptx", "markdown"}
+        ]
+        lead = [_SENT_RE.split(d["brief"])[0].rstrip(".") for d in prose[:4]]
+        tldr = f"{len(docs)} document{'s' if len(docs) != 1 else ''} in {folder_name}."
+        if lead:
+            tldr += " Highlights: " + "; ".join(lead) + "."
+    if not themes:
+        themes = _heuristic_themes(docs)
+
+    lines = [
+        f"# Executive Summary: {folder_name}",
+        "",
+        f"Folder: [{folder_name}]({folder_url})  ",
+        f"Generated: {generated}  ",
+        f"Documents: {len(docs)}",
+        "",
+        "## TL;DR",
+        "",
+        tldr,
+        "",
+    ]
+    if themes:
+        lines += ["## Themes", ""] + [f"- {t}" for t in themes] + [""]
+    lines += ["## Documents", ""]
+    for d in docs:
+        lines.append(f"### [{d['path']}]({d['url']})")
+        lines.append("")
+        lines.append(d.get("brief") or "")
+        kp = d.get("key_points") or []
+        if kp:
+            lines.append("")
+            lines += [f"- {p}" for p in kp]
+        lines.append("")
+    lines += ["## Sources", ""] + [f"- [{d['path']}]({d['url']})" for d in docs] + [""]
+    skipped = state.get("skipped") or []
+    if skipped:
+        lines += ["## Skipped", ""] + [f"- {s['path']}: {s['reason']}" for s in skipped] + [""]
+    if state.get("links_note"):
+        lines += [f"_Note: {state['links_note']}_", ""]
+    lines.append("_Generated by Box Doc Summarizer on DigitalOcean Managed Agents._")
+    md = hygiene_text("\n".join(lines))
+    return {"summary_md": md, "stage_summaries": _append(state, "synthesize: done")}
+
+
+# ---------------------------------------------------------------------------
+# ask / write_back / report
+# ---------------------------------------------------------------------------
+
+
+def ask(state: SummarizerState) -> dict[str, Any]:
+    if state.get("auto_approve"):
+        return {"decision": "approve", "stage_summaries": _append(state, "ask: auto-approve")}
+    from langgraph.types import interrupt
+
+    md = state.get("summary_md") or ""
+    preview = md if len(md) <= 3000 else md[:3000].rsplit("\n", 1)[0] + "\n…"
+    payload = {
+        "title": ask_title(),
+        "body": ask_body(
+            folder_name=state.get("folder_name") or "the folder",
+            filename=summary_filename(),
+            doc_count=len(state.get("documents") or []),
+            preview=preview,
+        ),
+        "choices": ["approve", "deny"],
+        "pending_action": "write_summary",
+    }
+    decision = _normalize_decision(interrupt(payload))
+    return {"ask_payload": payload, "decision": decision, "stage_summaries": _append(state, f"ask: {decision}")}
+
+
+def route_after_ask(state: SummarizerState) -> str:
+    return "write_back" if state.get("decision") == "approve" else "report"
+
+
+def write_back(state: SummarizerState) -> dict[str, Any]:
+    md = state.get("summary_md") or ""
+    name = summary_filename()
+    mode = state.get("source_mode")
+    try:
+        if mode == "api":
+            item = box_api.get_box_client().upload_text(
+                state["folder_id"], name, md, existing_file_id=state.get("existing_summary_id") or ""
+            )
+            return {
+                "status": "written",
+                "written_path": name,
+                "written_url": item.url,
+                "stage_summaries": _append(state, f"write_back: box file {item.id}"),
+            }
+        target_dir = Path(state.get("write_dir") or state.get("local_root") or ".")
+        target = target_dir / name
+        # In-place write (no temp+rename) so Box Mount keeps version history.
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(md)
+        url = target.resolve().as_uri()
+        if mode == "mount" and state.get("folder_url"):
+            url = state["folder_url"]
+        return {
+            "status": "written",
+            "written_path": str(target),
+            "written_url": url,
+            "stage_summaries": _append(state, f"write_back: {target}"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "write_failed", "write_error": str(exc)[:200], "stage_summaries": _append(state, "write_back: failed")}
+
+
+def report(state: SummarizerState) -> dict[str, Any]:
+    status = state.get("status") or ""
+    md = state.get("summary_md") or ""
+    if status == "blocked":
+        text = blocked_message(state.get("blocked_reason") or "unknown error")
+    elif status == "empty":
+        text = empty_message(state.get("folder_name") or "That folder")
+    elif status == "written":
+        text = written_message(summary_filename(), state.get("written_url") or "") + md
+    elif status == "write_failed":
+        text = write_failed_message(state.get("write_error") or "unknown error") + md
+    else:
+        status = "denied" if state.get("decision") == "deny" else "summarized"
+        text = (denied_message() if status == "denied" else "") + md
+    return {"status": status, "human_summary": text, "stage_summaries": _append(state, "report: complete"), **_reply(text)}
+
+
+intake_node = _mars_node(intake)
+connect_node = _mars_node(connect)
+inventory_node = _mars_node(inventory)
+extract_node = _mars_node(extract)
+brief_node = _mars_node(brief)
+links_node = _mars_node(links)
+synthesize_node = _mars_node(synthesize)
+ask_node = _mars_node(ask)
+write_back_node = _mars_node(write_back)
+report_node = _mars_node(report)
