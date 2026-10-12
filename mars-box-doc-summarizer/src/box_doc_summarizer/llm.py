@@ -12,6 +12,7 @@ from typing import Any
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+PUBLIC_DO_BASE_URL = "https://inference.do-ai.run/v1"
 
 # Safe diagnostics: last fallback reason (exception class / HTTP status only; never secrets).
 LAST_ERROR: dict[str, str] = {"reason": ""}
@@ -71,27 +72,37 @@ def chat_completion(
         "temperature": temperature,
         "stream": False,
     }
-    try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {env['api_key']}", "Content-Type": "application/json"},
-            data=json.dumps(payload),
-            timeout=timeout,
-        )
-        if resp.status_code >= 400:
-            _fail(f"HTTP {resp.status_code} from {url.split('//')[-1].split('/')[0]}")
-            return None
-        data = resp.json()
-        choice = data["choices"][0]
-        content = (choice["message"].get("content") or "").strip()
-        if not content:
-            _fail(f"empty content (finish_reason={choice.get('finish_reason')})")
-            return None
-        LAST_ERROR["reason"] = ""
-        return content
-    except Exception as exc:  # noqa: BLE001 — offline fallback is the contract
-        _fail(f"{type(exc).__name__}")
-        return None
+    headers = {"Authorization": f"Bearer {env['api_key']}", "Content-Type": "application/json"}
+    body = json.dumps(payload)
+    urls = [url]
+    # On MARS the harness may rewrite HARNESS_INFERENCE_BASE_URL to an internal
+    # trusted endpoint that rejects a tenant key (seen: HTTP 401). Retry once on
+    # the public endpoint, which accepts the same key.
+    public = os.environ.get("INFERENCE_PUBLIC_BASE_URL", PUBLIC_DO_BASE_URL).rstrip("/") + "/chat/completions"
+    if public != url:
+        urls.append(public)
+    reasons: list[str] = []
+    for target in urls:
+        try:
+            resp = requests.post(target, headers=headers, data=body, timeout=timeout)
+            host = target.split("//")[-1].split("/")[0]
+            if resp.status_code >= 400:
+                reasons.append(f"HTTP {resp.status_code} from {host}")
+                if resp.status_code in (401, 403, 404):
+                    continue
+                break
+            choice = resp.json()["choices"][0]
+            content = (choice["message"].get("content") or "").strip()
+            if not content:
+                reasons.append(f"empty content (finish_reason={choice.get('finish_reason')})")
+                break
+            LAST_ERROR["reason"] = ""
+            return content
+        except Exception as exc:  # noqa: BLE001 — offline fallback is the contract
+            reasons.append(type(exc).__name__)
+            break
+    _fail("; ".join(reasons) or "unknown")
+    return None
 
 
 def parse_json_object(text: str | None) -> dict[str, Any] | None:

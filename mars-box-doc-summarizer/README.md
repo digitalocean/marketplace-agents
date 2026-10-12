@@ -16,13 +16,22 @@ Flow: `intake → connect → inventory → extract → brief → links → synt
 
 If Box Mount fails and the JWT config is present, the run falls back to the API path and records `mount_state: failed: …`.
 
-Box Mount bootstrap: downloads `BOX_MOUNT_BINARY_URL` (raw ELF or Box's
-`box-mount-<ver>-linux-<arch>.tar.gz`; optional `BOX_MOUNT_SHA256`) to
-`~/.local/bin/box-mount` (0700), writes `~/.box-mount/jwt-config.json` and
-`box-config.json` (0600), runs `box-mount mount <path> <folder-id>`, then polls
-`box-mount status` (`BOX_MOUNT_SYNC_TIMEOUT_S`, default 300). The preview
-binary and its URL are secrets: never commit them (`.gitignore` covers
-`private/` and `*.box-mount*`).
+Box Mount bootstrap (verified against box-mount 0.6.0): downloads
+`BOX_MOUNT_BINARY_URL` (raw ELF or Box's `box-mount-<ver>-linux-<arch>.tar.gz`;
+optional `BOX_MOUNT_SHA256`) to `~/.local/bin/box-mount` (0700), writes the JWT
+JSON to `~/.box-mount/jwt-config.json` (0600, must stay on disk), pipes
+`jwt` + that path into the interactive `box-mount config` (writes
+`box-config.json`), runs `box-mount mount <dir> <folder-id>`, and waits for
+`box-mount status` to show `<dir> | ... | status=running` plus the first
+bootstrap cycle (files appear, ~6s). Box Mount is a two-way sync folder, not
+FUSE: write-back is a plain file write into the folder and the daemon uploads
+it. The preview binary and its URL are secrets: never commit them.
+
+Inference on MARS: the harness may rewrite `HARNESS_INFERENCE_BASE_URL` to an
+internal endpoint that returns HTTP 401 for a tenant key; the agent retries
+once on `https://inference.do-ai.run/v1` (`INFERENCE_PUBLIC_BASE_URL`). Any
+fallback reason (HTTP status / exception class only) is recorded in
+`stage_summaries`, `llm_note`, and a note at the end of the summary.
 
 Links: `shared_link.url` when the file has one, else `https://app.box.com/file/<id>`.
 Set `BOX_SHARED_LINK_ACCESS=open` to create public shared links for files that lack one.

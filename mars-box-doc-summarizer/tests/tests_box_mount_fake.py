@@ -9,10 +9,11 @@ from helpers import FIXTURE
 
 SCRIPT = """#!/bin/sh
 case "$1" in
-  status) if [ -f "$FAKE_BM_STATE" ]; then echo "$(cat "$FAKE_BM_STATE") synced"; else echo "No mount found."; fi ;;
+  config) read AUTH; read JWTPATH; [ "$AUTH" = "jwt" ] || exit 4 ;;
+  status) if [ -f "$FAKE_BM_STATE" ]; then cat "$FAKE_BM_STATE"; else echo "No mount found."; fi ;;
   mount)
     [ -n "$FAKE_BM_FAIL" ] && { echo "jwt auth failed" >&2; exit 2; }
-    mkdir -p "$2" && cp -R "$FAKE_BM_SRC"/. "$2"/ && echo "$2" > "$FAKE_BM_STATE" ;;
+    mkdir -p "$2" && cp -R "$FAKE_BM_SRC"/. "$2"/ && echo "$2 | box_folder_id=$3 | pid=1 | status=running" > "$FAKE_BM_STATE" ;;
 esac
 """
 

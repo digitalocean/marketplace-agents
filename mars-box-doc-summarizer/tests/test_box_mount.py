@@ -10,11 +10,17 @@ from box_doc_summarizer import box_mount
 FAKE = """#!/bin/sh
 STATE="$FAKE_BM_STATE"
 case "$1" in
+  config)
+    read AUTH; read JWTPATH
+    [ "$AUTH" = "jwt" ] || { echo "bad auth type" >&2; exit 4; }
+    mkdir -p "$FAKE_BM_HOME/.box-mount"
+    printf '{"auth_type": "jwt", "jwt_config_path": "%s"}' "$JWTPATH" > "$FAKE_BM_HOME/.box-mount/box-config.json" ;;
   status)
-    if [ -f "$STATE" ]; then echo "$(cat "$STATE") synced"; else echo "No mount found."; fi ;;
+    if [ -f "$STATE" ]; then cat "$STATE"; else echo "No mount found."; fi ;;
   mount)
     [ -n "$FAKE_BM_FAIL" ] && { echo "auth error" >&2; exit 3; }
-    echo "$2" > "$STATE"; echo "mounted $2 $3" ;;
+    mkdir -p "$2"; echo hi > "$2/doc.md"
+    echo "$2 | box_folder_id=$3 | pid=4242 | status=running" > "$STATE" ;;
   unmount) rm -f "$STATE" ;;
 esac
 """
@@ -28,6 +34,8 @@ def fake_bin(tmp_path, monkeypatch):
     b.chmod(0o755)
     monkeypatch.setenv("FAKE_BM_STATE", str(tmp_path / "state"))
     monkeypatch.setenv("BOX_MOUNT_PATH", str(tmp_path / "box"))
+    monkeypatch.setenv("FAKE_BM_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BOX_MOUNT_BOOTSTRAP_S", "2")
     monkeypatch.setenv("BOX_MOUNT_BINARY_URL", "https://example.invalid/box-mount.tar.gz")
     return b
 
@@ -38,7 +46,12 @@ def test_mount_writes_private_config(fake_bin, tmp_path, monkeypatch):
     assert res.ok and res.state == "mounted"
     jwt_file = tmp_path / "home" / ".box-mount" / "jwt-config.json"
     assert stat.S_IMODE(os.stat(jwt_file).st_mode) == 0o600
-    assert stat.S_IMODE(os.stat(jwt_file.parent / "box-config.json").st_mode) == 0o600
+    cfg = jwt_file.parent / "box-config.json"
+    assert stat.S_IMODE(os.stat(cfg).st_mode) == 0o600
+    import json
+
+    assert json.loads(cfg.read_text()) == {"auth_type": "jwt", "jwt_config_path": str(jwt_file)}
+    assert (tmp_path / "box" / "doc.md").exists()
     again = box_mount.ensure_mount("123", binary=str(fake_bin), home=str(tmp_path / "home"))
     assert again.state == "reused"
 

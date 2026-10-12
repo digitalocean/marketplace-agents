@@ -43,7 +43,7 @@ def test_fallback_reason_recorded(monkeypatch):
 
     monkeypatch.setattr(requests, "post", lambda *a, **k: R())
     assert llm.chat_completion("s", "u") is None
-    assert llm.last_error().startswith("HTTP 401") and "k" != llm.last_error()
+    assert "HTTP 401" in llm.last_error() and "Bearer" not in llm.last_error()
 
     def boom(*a, **k):
         raise requests.ConnectionError("x")
@@ -56,3 +56,28 @@ def test_fallback_reason_recorded(monkeypatch):
 def test_key_from_file_newline_is_stripped(monkeypatch):
     monkeypatch.setenv("HARNESS_INFERENCE_API_KEY", "abc\n")
     assert resolve_llm_env()["api_key"] == "abc"
+
+
+def test_401_on_rewritten_endpoint_retries_public(monkeypatch):
+    import requests
+
+    from box_doc_summarizer import llm
+
+    monkeypatch.setenv("HARNESS_INFERENCE_API_KEY", "k")
+    monkeypatch.setenv("HARNESS_INFERENCE_BASE_URL", "http://inference-trusted.internal/v1")
+    calls = []
+
+    class R:
+        def __init__(self, code):
+            self.status_code = code
+
+        def json(self):
+            return {"choices": [{"message": {"content": "hello"}}]}
+
+    def post(url, **k):
+        calls.append(url)
+        return R(401 if "internal" in url else 200)
+
+    monkeypatch.setattr(requests, "post", post)
+    assert llm.chat_completion("s", "u") == "hello"
+    assert calls[1].startswith("https://inference.do-ai.run/v1")

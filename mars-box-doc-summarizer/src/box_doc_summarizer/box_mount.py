@@ -2,8 +2,12 @@
 
 Only used when secret ``BOX_MOUNT_BINARY_URL`` is set. The default Box path is
 the REST API (:mod:`box_doc_summarizer.box_api`). When enabled, this module
-downloads the binary, writes the JWT config as 600-mode files, mounts the
-folder at ``BOX_MOUNT_PATH`` and polls ``box-mount status`` until synced.
+downloads the binary, writes the JWT JSON as a 600-mode file, runs the
+interactive ``box-mount config`` (stdin: ``jwt`` + JWT path), then
+``box-mount mount <dir> <folder-id>``. Box Mount 0.6.0 is a two-way sync
+folder, not FUSE: ``status`` reports ``<dir> | ... | status=running`` and files
+appear after the first bootstrap cycle. Write-back is a plain file write into
+the folder; the daemon uploads it.
 """
 
 from __future__ import annotations
@@ -40,11 +44,21 @@ def _run(binary: str, *args: str, timeout: float = 120) -> subprocess.CompletedP
     return subprocess.run([binary, *args], capture_output=True, text=True, timeout=timeout)
 
 
-def _status_synced(out: str, path: str) -> bool:
-    low = out.lower()
-    if "no mount found" in low:
-        return False
-    return path.lower() in low and any(w in low for w in ("synced", "idle", "ready", "up to date", "mounted"))
+def _status_running(out: str, path: str) -> bool:
+    """Box Mount 0.6.0: ``<dir> | box_folder_id=<id> | pid=<pid> | status=running``."""
+    for line in out.splitlines():
+        if line.split("|")[0].strip() == path and "status=running" in line:
+            return True
+    return False
+
+
+def _wait_bootstrap(path: str, deadline: float) -> None:
+    """Sync folder (not FUSE): files appear after the first bootstrap cycle (~6s)."""
+    p = Path(path)
+    while time.time() < deadline:
+        if any(not c.name.startswith(".") for c in p.iterdir()):
+            return
+        time.sleep(1)
 
 
 def _download_binary(url: str, dest: Path) -> None:
@@ -96,7 +110,7 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
         if not bin_path.exists():
             _download_binary(os.environ["BOX_MOUNT_BINARY_URL"], bin_path)
         status = _run(str(bin_path), "status")
-        if status.returncode == 0 and _status_synced(status.stdout, target):
+        if status.returncode == 0 and _status_running(status.stdout, target):
             return MountResult(ok=True, state="reused", path=target)
 
         jwt_json = os.environ.get("BOX_JWT_CONFIG_JSON", "").strip()
@@ -104,11 +118,20 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
             return MountResult(ok=False, state="blocked", message="BOX_JWT_CONFIG_JSON is not set.")
         base = Path(home or os.path.expanduser("~")) / ".box-mount"
         jwt_path = base / "jwt-config.json"
-        _write_private(jwt_path, jwt_json)
-        _write_private(
-            base / "box-config.json",
-            '{"auth_type": "jwt", "jwt_config_path": "%s"}' % jwt_path,
+        _write_private(jwt_path, jwt_json)  # must stay on disk for the sync daemon
+        # `box-mount config` is interactive (no flags): auth type, then JWT config path.
+        cfg = subprocess.run(
+            [str(bin_path), "config"],
+            input=f"jwt\n{jwt_path}\n",
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
+        if cfg.returncode != 0:
+            return MountResult(ok=False, state="blocked", message=(cfg.stderr or cfg.stdout or "config failed").strip()[:300])
+        cfg_file = base / "box-config.json"
+        if cfg_file.exists():
+            os.chmod(cfg_file, 0o600)
         Path(target).mkdir(parents=True, exist_ok=True)
         res = _run(str(bin_path), "mount", target, str(folder_id))
         if res.returncode != 0:
@@ -116,9 +139,10 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
         deadline = time.time() + float(os.environ.get("BOX_MOUNT_SYNC_TIMEOUT_S", "300"))
         while time.time() < deadline:
             st = _run(str(bin_path), "status")
-            if st.returncode == 0 and _status_synced(st.stdout, target):
+            if st.returncode == 0 and _status_running(st.stdout, target):
+                _wait_bootstrap(target, min(deadline, time.time() + float(os.environ.get("BOX_MOUNT_BOOTSTRAP_S", "30"))))
                 return MountResult(ok=True, state="mounted", path=target)
             time.sleep(2)
-        return MountResult(ok=False, state="blocked", message="Box Mount initial sync timed out.")
+        return MountResult(ok=False, state="blocked", message="Box Mount did not reach status=running in time.")
     except Exception as exc:  # noqa: BLE001
         return MountResult(ok=False, state="blocked", message=f"{type(exc).__name__}: {exc}"[:300])
