@@ -27,6 +27,7 @@ class OutputState(TypedDict, total=False):
     mount_state: str
     source_mode: str
     links_note: str
+    llm_note: str
     decision: str
     stage_summaries: list[str]
 
@@ -48,6 +49,7 @@ class SummarizerState(TypedDict, total=False):
     skipped: list[dict[str, Any]]
     existing_summary_id: str
     links_note: str
+    llm_note: str
     summary_md: str
     ask_payload: dict[str, Any]
     decision: str

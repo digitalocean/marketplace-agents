@@ -20,7 +20,7 @@ env:
   SUMMARY_FILENAME: EXECUTIVE-SUMMARY.md
   MAX_FILES: "50"
   # Set to "open" to create public shared links for files that lack one.
-  BOX_SHARED_LINK_ACCESS: ""
+  BOX_SHARED_LINK_ACCESS: open
 secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
   # Developer Console JWT config JSON (whole file contents).

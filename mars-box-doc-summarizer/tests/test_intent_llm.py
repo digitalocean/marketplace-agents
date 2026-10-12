@@ -29,3 +29,25 @@ def test_llm_env_prefers_harness(monkeypatch):
 def test_parse_json_object():
     assert parse_json_object('```json\n{"brief": "x"}\n```') == {"brief": "x"}
     assert parse_json_object("nope") is None
+
+
+def test_fallback_reason_recorded(monkeypatch):
+    import requests
+
+    from box_doc_summarizer import llm
+
+    monkeypatch.setenv("HARNESS_INFERENCE_API_KEY", "k")
+
+    class R:
+        status_code = 401
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: R())
+    assert llm.chat_completion("s", "u") is None
+    assert llm.last_error().startswith("HTTP 401") and "k" != llm.last_error()
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("x")
+
+    monkeypatch.setattr(requests, "post", boom)
+    llm.chat_completion("s", "u")
+    assert llm.last_error() == "ConnectionError"

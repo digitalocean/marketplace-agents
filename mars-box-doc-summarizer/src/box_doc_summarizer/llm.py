@@ -13,6 +13,17 @@ from typing import Any
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
+# Safe diagnostics: last fallback reason (exception class / HTTP status only; never secrets).
+LAST_ERROR: dict[str, str] = {"reason": ""}
+
+
+def _fail(reason: str) -> None:
+    LAST_ERROR["reason"] = reason[:160]
+
+
+def last_error() -> str:
+    return LAST_ERROR["reason"]
+
 
 def resolve_llm_env() -> dict[str, str | None]:
     base_url = os.environ.get("HARNESS_INFERENCE_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
@@ -35,12 +46,13 @@ def chat_completion(
     system: str,
     user: str,
     *,
-    max_tokens: int = 700,
+    max_tokens: int = 2000,
     temperature: float = 0.2,
     timeout: float = 90.0,
 ) -> str | None:
     """Return assistant text or None on any failure (callers fall back to heuristics)."""
     if not harness_env_available():
+        _fail("no API key (or BOX_SUMMARIZER_LLM=0)")
         return None
     import requests
 
@@ -64,11 +76,18 @@ def chat_completion(
             timeout=timeout,
         )
         if resp.status_code >= 400:
+            _fail(f"HTTP {resp.status_code} from {url.split('//')[-1].split('/')[0]}")
             return None
         data = resp.json()
-        content = data["choices"][0]["message"].get("content") or ""
-        return content.strip() or None
-    except Exception:  # noqa: BLE001 — offline fallback is the contract
+        choice = data["choices"][0]
+        content = (choice["message"].get("content") or "").strip()
+        if not content:
+            _fail(f"empty content (finish_reason={choice.get('finish_reason')})")
+            return None
+        LAST_ERROR["reason"] = ""
+        return content
+    except Exception as exc:  # noqa: BLE001 — offline fallback is the contract
+        _fail(f"{type(exc).__name__}")
         return None
 
 
