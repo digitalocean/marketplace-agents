@@ -16,7 +16,7 @@ template: langgraph
 size: mars-2vcpu-4gb
 env:
   FRAMEWORK_REPO: "https://github.com/scott/marketplace-agents.git"
-  FRAMEWORK_REPO_SHA: "9c186a806b0653bb49655fa674b41a3f88de0efe"
+  FRAMEWORK_REPO_SHA: "c5ce9a90583aea0c8624d699252675bdc985c604"
   FRAMEWORK_SUBDIR: "mars-box-doc-summarizer"
   HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
