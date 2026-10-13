@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,36 +168,41 @@ def connect(state: SummarizerState) -> dict[str, Any]:
         }
 
     folder_name, folder_link = f"Box folder {folder_id}", box_api.folder_url(folder_id)
+    allow_api = os.environ.get("BOX_ALLOW_API_FALLBACK", "0").strip() == "1"
+    mount_fail = None
     if box_mount.mount_enabled():
         res = box_mount.ensure_mount(folder_id)
-        if not res.ok:
-            if not box_api.box_api_configured():
-                return {"status": "blocked", "blocked_reason": f"Box Mount: {res.message}", "mount_state": res.state}
-            mount_fail = res
-        else:
-            mount_fail = None
-    else:
-        mount_fail = None
-        res = None
-    if res is not None and mount_fail is None:
-        if box_api.box_api_configured():
-            try:
-                f = box_api.get_box_client().get_folder(folder_id)
-                folder_name, folder_link = f.name, f.url
-            except Exception:  # noqa: BLE001
-                pass
-        return {
-            "source_mode": "mount",
-            "local_root": res.path,
-            "folder_name": folder_name,
-            "folder_url": folder_link,
-            "mount_state": res.state,
-            "stage_summaries": _append(state, f"connect: box mount {res.state}"),
-        }
+        notes = [f"connect: mount step: {x}" for x in res.steps]
+        if res.ok:
+            if box_api.box_api_configured():
+                try:  # folder name + link only; reads/writes go through the mount
+                    f = box_api.get_box_client().get_folder(folder_id)
+                    folder_name, folder_link = f.name, f.url
+                except Exception:  # noqa: BLE001
+                    pass
+            prev = list(state.get("stage_summaries") or [])
+            return {
+                "source_mode": "mount",
+                "local_root": res.path,
+                "folder_name": folder_name,
+                "folder_url": folder_link,
+                "mount_state": res.state,
+                "mount_steps": res.steps,
+                "stage_summaries": prev + notes + [f"connect: source_mode=mount ({res.state}) at {res.path}"],
+            }
+        if not allow_api:
+            return {
+                "status": "blocked",
+                "blocked_reason": f"Box Mount: {res.message}",
+                "mount_state": res.state,
+                "mount_steps": res.steps,
+                "source_mode": "mount",
+            }
+        mount_fail = res
 
     mount_state = f"failed: {mount_fail.message}"[:200] if mount_fail else "skipped"
     if not box_api.box_api_configured():
-        return {"status": "blocked", "blocked_reason": "BOX_JWT_CONFIG_JSON is not set.", "mount_state": "skipped"}
+        return {"status": "blocked", "blocked_reason": "BOX_JWT_CONFIG_JSON is not set.", "mount_state": mount_state}
     try:
         folder = box_api.get_box_client().get_folder(folder_id)
     except Exception as exc:  # noqa: BLE001
@@ -204,12 +210,13 @@ def connect(state: SummarizerState) -> dict[str, Any]:
         if mount_fail:
             reason = f"Box Mount: {mount_fail.message}. Box API fallback: {reason}"[:400]
         return {"status": "blocked", "blocked_reason": reason, "mount_state": mount_state}
+    line = "connect: source_mode=api" + (" (explicit BOX_ALLOW_API_FALLBACK=1 after mount failure)" if mount_fail else "")
     return {
         "source_mode": "api",
         "folder_name": folder.name,
         "folder_url": folder.url,
         "mount_state": mount_state,
-        "stage_summaries": _append(state, "connect: box api"),
+        "stage_summaries": _append(state, line),
     }
 
 
@@ -282,7 +289,11 @@ def inventory(state: SummarizerState) -> dict[str, Any]:
         "documents": docs,
         "skipped": skipped,
         "existing_summary_id": existing_summary_id,
-        "stage_summaries": _append(state, f"inventory: {len(docs)} docs, {len(skipped)} skipped"),
+        "stage_summaries": _append(
+            state,
+            f"inventory: {len(docs)} docs, {len(skipped)} skipped"
+            + (f" (read from mount path {state.get('local_root')})" if state.get("source_mode") == "mount" else ""),
+        ),
     }
 
 
@@ -404,7 +415,7 @@ def links(state: SummarizerState) -> dict[str, Any]:
             note = f"Box link lookup failed ({str(exc)[:120]}); using folder links."
 
     access = os.environ.get("BOX_SHARED_LINK_ACCESS", "").strip()
-    if access and mode == "api":
+    if access and mode in {"api", "mount"} and box_api.box_api_configured():
         client = box_api.get_box_client()
         for d in docs:
             if d.get("file_id") and "app.box.com/file/" in (d.get("url") or ""):
@@ -549,6 +560,24 @@ def route_after_ask(state: SummarizerState) -> str:
     return "write_back" if state.get("decision") == "approve" else "report"
 
 
+def _wait_mount_upload(folder_id: str, name: str, content: str) -> str:
+    """Poll Box (read-only API) until the mount daemon has uploaded ``name`` with matching content."""
+    if not folder_id or not box_api.box_api_configured():
+        return ""
+    deadline = time.time() + _int_env("BOX_MOUNT_UPLOAD_WAIT_S", 90)
+    want = content.encode("utf-8")
+    client = box_api.get_box_client()
+    while time.time() < deadline:
+        try:
+            for item in client.list_files(folder_id, max_depth=1):
+                if item.path == name and client.download(item.id) == want:
+                    return item.url
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(3)
+    return ""
+
+
 def write_back(state: SummarizerState) -> dict[str, Any]:
     md = state.get("summary_md") or ""
     name = summary_filename()
@@ -570,13 +599,21 @@ def write_back(state: SummarizerState) -> dict[str, Any]:
         with open(target, "w", encoding="utf-8") as fh:
             fh.write(md)
         url = target.resolve().as_uri()
-        if mode == "mount" and state.get("folder_url"):
-            url = state["folder_url"]
+        note = f"write_back: {target}"
+        if mode == "mount":
+            url = state.get("folder_url") or url
+            note = f"write_back: wrote {target} via mount"
+            synced = _wait_mount_upload(state.get("folder_id") or "", name, md)
+            if synced:
+                url = synced
+                note += f"; synced to Box ({synced})"
+            elif box_api.box_api_configured():
+                note += "; Box sync not confirmed before timeout"
         return {
             "status": "written",
             "written_path": str(target),
             "written_url": url,
-            "stage_summaries": _append(state, f"write_back: {target}"),
+            "stage_summaries": _append(state, note),
         }
     except Exception as exc:  # noqa: BLE001
         return {"status": "write_failed", "write_error": str(exc)[:200], "stage_summaries": _append(state, "write_back: failed")}
@@ -596,7 +633,21 @@ def report(state: SummarizerState) -> dict[str, Any]:
     else:
         status = "denied" if state.get("decision") == "deny" else "summarized"
         text = (denied_message() if status == "denied" else "") + md
-    return {"status": status, "human_summary": text, "stage_summaries": _append(state, "report: complete"), **_reply(text)}
+    mode = state.get("source_mode") or ""
+    if mode and status not in {"chat", "help"}:
+        footer = f"Run mode: {mode}"
+        if mode == "mount":
+            steps = "; ".join(state.get("mount_steps") or [])
+            footer += f" ({state.get('mount_state') or ''}{': ' + steps if steps else ''})"
+        if status == "written" and mode == "mount":
+            footer += ". Summary written through the mount" + (", synced to Box." if "app.box.com" in (state.get("written_url") or "") else ".")
+        text = text.rstrip() + "\n\n" + footer
+    return {
+        "status": status,
+        "human_summary": text,
+        "stage_summaries": _append(state, f"report: complete (source_mode={mode or 'n/a'})"),
+        **_reply(text),
+    }
 
 
 intake_node = _mars_node(intake)

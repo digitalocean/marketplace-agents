@@ -115,5 +115,36 @@ def test_download_rejects_html(tmp_path, monkeypatch):
             pass
 
     monkeypatch.setattr(requests, "get", lambda *a, **k: R())
+    monkeypatch.setenv("BOX_MOUNT_SHA256", __import__("hashlib").sha256(R.content).hexdigest())
     with pytest.raises(RuntimeError, match="not a Linux binary"):
         box_mount._download_binary("https://x", tmp_path / "bm")
+
+
+def test_sha256_required_fail_closed(tmp_path, monkeypatch):
+    import requests
+
+    called = []
+    monkeypatch.setattr(requests, "get", lambda *a, **k: called.append(1))
+    with pytest.raises(RuntimeError, match="BOX_MOUNT_SHA256 is required"):
+        box_mount._download_binary("https://secret.example/x", tmp_path / "bm")
+    assert not called  # nothing downloaded without a pin
+
+
+def test_download_error_never_echoes_url(tmp_path, monkeypatch):
+    import requests
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("https://secret.example/x?token=abc")
+
+    monkeypatch.setattr(requests, "get", boom)
+    monkeypatch.setenv("BOX_MOUNT_SHA256", "0" * 64)
+    with pytest.raises(RuntimeError) as ei:
+        box_mount._download_binary("https://secret.example/x?token=abc", tmp_path / "bm")
+    assert "secret.example" not in str(ei.value)
+
+
+def test_mount_steps_evidence(fake_bin, tmp_path, monkeypatch):
+    monkeypatch.setenv("BOX_JWT_CONFIG_JSON", "{}")
+    res = box_mount.ensure_mount("123", binary=str(fake_bin), home=str(tmp_path / "home"))
+    joined = " | ".join(res.steps)
+    assert "config auth_type=jwt" in joined and "status=running" in joined and "bootstrap synced 1 files" in joined

@@ -29,6 +29,8 @@ def install_fake_mount(tmp_path: Path, monkeypatch, *, fail: bool = False) -> Pa
     monkeypatch.setenv("BOX_MOUNT_PATH", str(mount_dir))
     monkeypatch.setenv("BOX_MOUNT_BINARY_URL", "https://example.invalid/box-mount.tar.gz")
     monkeypatch.setenv("BOX_JWT_CONFIG_JSON", "{}")
+    monkeypatch.setenv("BOX_MOUNT_BOOTSTRAP_S", "2")
+    monkeypatch.setenv("BOX_MOUNT_UPLOAD_WAIT_S", "5")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(box_mount, "default_binary_path", lambda: b)
     if fail:

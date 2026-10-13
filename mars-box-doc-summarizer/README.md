@@ -1,34 +1,23 @@
 # Box Doc Summarizer (MARS LangGraph agent)
 
-Briefs every document in one Box folder and writes one executive summary
-(TL;DR, themes, a section per document, a link to every file) back to the
-folder after human approval.
+**A Box Mount demo.** The agent syncs a Box folder into its MARS sandbox with
+Box Mount (private preview), reads every document from the mount, and writes
+the executive summary back through the mount, where the sync daemon uploads it
+to Box as a new version.
 
-Flow: `intake → connect → inventory → extract → brief → links → synthesize → ask → write_back → report`
-
-## Box access modes
+Briefs every document ## Box access modes
 
 | Mode | When | Reads | Write-back |
 |------|------|-------|------------|
-| **Box API (primary / fallback)** | `BOX_JWT_CONFIG_JSON` set | REST list (recursive, `MAX_DEPTH`) + download | Upload `SUMMARY_FILENAME`, or new version of the existing file |
-| **Box Mount (optional, private preview)** | `BOX_MOUNT_BINARY_URL` set | Mounted folder at `BOX_MOUNT_PATH` | In-place write (no temp+rename) so Box keeps versions |
-| **Fixture** | input `fixture_path` | Local directory | `write_dir` (or the fixture dir) |
+| **Box Mount (primary)** | `BOX_MOUNT_BINARY_URL` + `BOX_MOUNT_SHA256` set | Synced folder at `BOX_MOUNT_PATH` | Plain file write into the folder; daemon uploads (new Box version). The agent confirms the upload by reading the file back through the API |
+| Box API (explicit fallback) | No mount configured, or `BOX_ALLOW_API_FALLBACK=1` after a mount failure | REST list + download | Upload / new version |
+| Fixture | input `fixture_path` | Local directory | `write_dir` |
 
-If Box Mount fails and the JWT config is present, the run falls back to the API path and records `mount_state: failed: …`.
+Without `BOX_ALLOW_API_FALLBACK=1`, a mount failure ends the run as `blocked` with the reason. It never quietly switches to the API. The reply ends with a `Run mode:` line, for example `Run mode: mount (mounted: binary downloaded, sha256 verified; box-mount 0.6.0; config auth_type=jwt; status=running at /workspace/box; bootstrap synced 6 files)`. `stage_summaries` records each step.
 
-Box Mount bootstrap (verified against box-mount 0.6.0): downloads
-`BOX_MOUNT_BINARY_URL` (raw ELF or Box's `box-mount-<ver>-linux-<arch>.tar.gz`;
-optional `BOX_MOUNT_SHA256`) to `~/.local/bin/box-mount` (0700), writes the JWT
-JSON to `~/.box-mount/jwt-config.json` (0600, must stay on disk), pipes
-`jwt` + that path into the interactive `box-mount config` (writes
-`box-config.json`), runs `box-mount mount <dir> <folder-id>`, and waits for
-`box-mount status` to show `<dir> | ... | status=running` plus the first
-bootstrap cycle (files appear, ~6s). Box Mount is a two-way sync folder, not
-FUSE: write-back is a plain file write into the folder and the daemon uploads
-it. The preview binary and its URL are secrets: never commit them.
+**What still uses the Box API in mount mode:** Box Mount syncs files but can't create links. The same JWT is used read-only to look up the folder name and each file's id (for `app.box.com/file/<id>` links), to create public shared links when `BOX_SHARED_LINK_ACCESS=open`, and to confirm the summary upload.
 
-Inference on MARS: the harness may rewrite `HARNESS_INFERENCE_BASE_URL` to an
-internal endpoint that returns HTTP 401 for a tenant key; the agent retries
+ HTTP 401 for a tenant key; the agent retries
 once on `https://inference.do-ai.run/v1` (`INFERENCE_PUBLIC_BASE_URL`). Any
 fallback reason (HTTP status / exception class only) is recorded in
 `stage_summaries`, `llm_note`, and a note at the end of the summary.
@@ -42,7 +31,9 @@ Set `BOX_SHARED_LINK_ACCESS=open` to create public shared links for files that l
 |------|------|---------|-------|
 | `HARNESS_INFERENCE_API_KEY` | secret | | Briefs + TL;DR via direct HTTP `stream:false`; heuristics offline |
 | `BOX_JWT_CONFIG_JSON` | secret | | Developer Console JWT config (whole file) |
-| `BOX_MOUNT_BINARY_URL` | secret | | Optional, enables Box Mount |
+| `BOX_MOUNT_BINARY_URL` | secret | | Box Mount build URL (required for the demo) |
+| `BOX_MOUNT_SHA256` | env | | Required with the URL; download fails closed on mismatch |
+| `BOX_ALLOW_API_FALLBACK` | env | `0` | `1` allows API reads/writes if the mount fails |
 | `BOX_FOLDER_ID` | env | | Default folder for `Refresh` |
 | `BOX_MOUNT_PATH` | env | `/workspace/box` | |
 | `SUMMARY_FILENAME` | env | `EXECUTIVE-SUMMARY.md` | Excluded from inventory |

@@ -26,6 +26,11 @@ class MountResult:
     state: str  # mounted | reused | blocked | skipped
     path: str = ""
     message: str = ""
+    steps: list = None  # safe evidence lines (no secrets, no URL)
+
+    def __post_init__(self):
+        if self.steps is None:
+            self.steps = []
 
 
 def mount_enabled() -> bool:
@@ -72,11 +77,20 @@ def _download_binary(url: str, dest: Path) -> None:
     import requests
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    resp = requests.get(url, timeout=600, allow_redirects=True)
-    resp.raise_for_status()
+    want_pre = os.environ.get("BOX_MOUNT_SHA256", "").strip()
+    if not want_pre:
+        raise RuntimeError("BOX_MOUNT_SHA256 is required when BOX_MOUNT_BINARY_URL is set.")
+    try:
+        resp = requests.get(url, timeout=600, allow_redirects=True)
+        resp.raise_for_status()
+    except Exception as exc:  # never echo the (secret) URL
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        raise RuntimeError(f"Box Mount download failed ({type(exc).__name__}{', HTTP ' + str(code) if code else ''}).") from None
     data = resp.content
     want = os.environ.get("BOX_MOUNT_SHA256", "").strip().lower()
-    if want and hashlib.sha256(data).hexdigest() != want:
+    if not want:
+        raise RuntimeError("BOX_MOUNT_SHA256 is required when BOX_MOUNT_BINARY_URL is set.")
+    if hashlib.sha256(data).hexdigest() != want:
         raise RuntimeError("Box Mount download failed SHA256 check.")
     if data[:2] == b"\x1f\x8b":
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
@@ -106,16 +120,28 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
         return MountResult(ok=False, state="skipped", message="Box Mount not configured.")
     target = mount_path()
     bin_path = Path(binary) if binary else default_binary_path()
+    steps: list[str] = []
+
+    def blocked(msg: str) -> MountResult:
+        return MountResult(ok=False, state="blocked", path=target, message=msg[:300], steps=steps)
+
     try:
         if not bin_path.exists():
             _download_binary(os.environ["BOX_MOUNT_BINARY_URL"], bin_path)
+            steps.append("binary downloaded, sha256 verified")
+        else:
+            steps.append("binary present")
+        ver = _run(str(bin_path), "--version", timeout=30)
+        if ver.returncode == 0 and ver.stdout.strip():
+            steps.append(ver.stdout.strip().splitlines()[0][:40])
         status = _run(str(bin_path), "status")
         if status.returncode == 0 and _status_running(status.stdout, target):
-            return MountResult(ok=True, state="reused", path=target)
+            steps.append(f"mount already running at {target}")
+            return MountResult(ok=True, state="reused", path=target, steps=steps)
 
         jwt_json = os.environ.get("BOX_JWT_CONFIG_JSON", "").strip()
         if not jwt_json:
-            return MountResult(ok=False, state="blocked", message="BOX_JWT_CONFIG_JSON is not set.")
+            return blocked("BOX_JWT_CONFIG_JSON is not set.")
         base = Path(home or os.path.expanduser("~")) / ".box-mount"
         jwt_path = base / "jwt-config.json"
         _write_private(jwt_path, jwt_json)  # must stay on disk for the sync daemon
@@ -128,21 +154,26 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
             timeout=60,
         )
         if cfg.returncode != 0:
-            return MountResult(ok=False, state="blocked", message=(cfg.stderr or cfg.stdout or "config failed").strip()[:300])
+            return blocked("box-mount config failed: " + (cfg.stderr or cfg.stdout or "").strip()[:200])
         cfg_file = base / "box-config.json"
         if cfg_file.exists():
             os.chmod(cfg_file, 0o600)
+        steps.append("config auth_type=jwt")
         Path(target).mkdir(parents=True, exist_ok=True)
         res = _run(str(bin_path), "mount", target, str(folder_id))
         if res.returncode != 0:
-            return MountResult(ok=False, state="blocked", message=(res.stderr or res.stdout or "mount failed").strip()[:300])
+            return blocked("box-mount mount failed: " + (res.stderr or res.stdout or "").strip()[:200])
         deadline = time.time() + float(os.environ.get("BOX_MOUNT_SYNC_TIMEOUT_S", "300"))
         while time.time() < deadline:
             st = _run(str(bin_path), "status")
             if st.returncode == 0 and _status_running(st.stdout, target):
+                steps.append(f"status=running at {target}")
                 _wait_bootstrap(target, min(deadline, time.time() + float(os.environ.get("BOX_MOUNT_BOOTSTRAP_S", "30"))))
-                return MountResult(ok=True, state="mounted", path=target)
+                n = sum(1 for p in Path(target).rglob("*") if p.is_file() and not any(x.startswith(".") for x in p.relative_to(target).parts))
+                steps.append(f"bootstrap synced {n} files")
+                return MountResult(ok=True, state="mounted", path=target, steps=steps)
             time.sleep(2)
-        return MountResult(ok=False, state="blocked", message="Box Mount did not reach status=running in time.")
+        return blocked("Box Mount did not reach status=running in time.")
     except Exception as exc:  # noqa: BLE001
-        return MountResult(ok=False, state="blocked", message=f"{type(exc).__name__}: {exc}"[:300])
+        msg = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        return MountResult(ok=False, state="blocked", path=target, message=msg[:300], steps=steps)

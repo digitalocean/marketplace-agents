@@ -107,17 +107,38 @@ def test_auto_approve_skips_interrupt():
 
 def test_mount_mode_end_to_end(tmp_path, monkeypatch):
     mount_dir = install_fake_mount(tmp_path, monkeypatch)
-    fake = FakeBoxClient(root=FIXTURE)
-    box_api.set_box_client_factory(lambda: fake)
+    monkeypatch.setenv("BOX_SHARED_LINK_ACCESS", "open")
+    clients = []
+
+    def factory():  # Box "sees" whatever the sync daemon has in the mount dir
+        c = FakeBoxClient(root=mount_dir if mount_dir.exists() else FIXTURE)
+        clients.append(c)
+        return c
+
+    box_api.set_box_client_factory(factory)
     out, _ = _run({"folder_id": "111"}, "approve")
     assert out["source_mode"] == "mount" and out["mount_state"] in {"mounted", "reused"}
     assert (mount_dir / "EXECUTIVE-SUMMARY.md").exists()
-    assert fake.uploads == []  # mount mode writes through the mount, not the API
-    assert all("app.box.com/file/" in d["url"] for d in out["documents"])
+    assert all(c.uploads == [] for c in clients)  # never written through the API
+    assert all(d["url"].startswith("https://app.box.com/s/fake") for d in out["documents"])
+    notes = " | ".join(out["stage_summaries"])
+    assert "source_mode=mount" in notes and "read from mount path" in notes
+    assert "via mount; synced to Box" in notes
+    assert "Run mode: mount" in _last_ai(out)
 
 
-def test_mount_failure_falls_back_to_api(tmp_path, monkeypatch):
+def test_mount_failure_blocks_without_flag(tmp_path, monkeypatch):
     install_fake_mount(tmp_path, monkeypatch, fail=True)
+    fake = FakeBoxClient()
+    box_api.set_box_client_factory(lambda: fake)
+    out = compile_graph().invoke({"folder_id": "111"})
+    assert out["status"] == "blocked" and fake.uploads == []
+    assert "Box Mount" in _last_ai(out)
+
+
+def test_mount_failure_falls_back_to_api_only_with_flag(tmp_path, monkeypatch):
+    install_fake_mount(tmp_path, monkeypatch, fail=True)
+    monkeypatch.setenv("BOX_ALLOW_API_FALLBACK", "1")
     fake = FakeBoxClient()
     box_api.set_box_client_factory(lambda: fake)
     out, _ = _run({"folder_id": "111"}, "approve")
