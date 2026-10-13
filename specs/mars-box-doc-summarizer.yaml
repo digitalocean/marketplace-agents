@@ -19,11 +19,13 @@ env:
   FRAMEWORK_SUBDIR: "mars-box-doc-summarizer"
   HARNESS_INFERENCE_BASE_URL: "https://inference.do-ai.run/v1"
   HARNESS_INFERENCE_MODEL: deepseek-v4-pro
-  BOX_FOLDER_ID: "<box-folder-id>"
+  # Optional default folder when a run has no chat folder (e.g. webhook Refresh). Chat can list/summarize by name without this.
+  BOX_FOLDER_ID: ""
   BOX_MOUNT_PATH: /workspace/box
   SUMMARY_FILENAME: EXECUTIVE-SUMMARY.md
   MAX_FILES: "50"
   # box-mount-0.6.0-linux-x86_64.tar.gz
+  BOX_MOUNT_BINARY_URL: "https://cloud.app.box.com/index.php?rm=box_download_shared_file&shared_name=mkbs1cmmwlai5ebcd5xnkvzvahzmfimk&file_id=f_2467186907552"
   BOX_MOUNT_SHA256: "b8bd648baefab5addaa8bc1098b942cf246d2a800aeb6368fd472b0c9b9f5ade"
   BOX_ALLOW_API_FALLBACK: "0"
   # Set to "open" to create public shared links for files that lack one.
@@ -32,8 +34,6 @@ secrets:
   HARNESS_INFERENCE_API_KEY: "<DO_INFERENCE_KEY>"
   # Developer Console JWT config JSON (whole file contents).
   BOX_JWT_CONFIG_JSON: "<box-jwt-config-json>"
-  # Required for Box Mount mode: direct download of the preview build (secret).
-  BOX_MOUNT_BINARY_URL: "<box-mount-direct-download-url>"
 tools:
   - do.actions
 permissions:
