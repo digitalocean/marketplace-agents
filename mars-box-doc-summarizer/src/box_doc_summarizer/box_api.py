@@ -71,6 +71,8 @@ class BoxClient(Protocol):
 
     def download(self, file_id: str) -> bytes: ...
 
+    def list_folders(self, root_id: str = "0", *, max_depth: int = 3, max_items: int = 200) -> list[BoxItem]: ...
+
     def upload_text(self, folder_id: str, name: str, content: str, *, existing_file_id: str = "") -> BoxItem: ...
 
     def ensure_shared_link(self, file_id: str, access: str = "open") -> str: ...
@@ -229,6 +231,24 @@ class RestBoxClient:
                 if len(files) >= max_items:
                     break
         return files
+
+    def list_folders(self, root_id: str = "0", *, max_depth: int = 3, max_items: int = 200) -> list[BoxItem]:
+        """Folders visible to this identity (App Access Only: only folders shared with
+        or owned by the service account), breadth-first from ``root_id``."""
+        out: list[BoxItem] = []
+        queue: list[tuple[str, str, int]] = [(str(root_id), "", 0)]
+        while queue and len(out) < max_items:
+            fid, prefix, depth = queue.pop(0)
+            for entry in self._list_children(fid):
+                if entry.get("type") != "folder":
+                    continue
+                rel = f"{prefix}{entry.get('name') or ''}"
+                out.append(BoxItem(id=str(entry["id"]), name=entry.get("name") or "", path=rel, type="folder"))
+                if depth + 1 < max_depth:
+                    queue.append((str(entry["id"]), rel + "/", depth + 1))
+                if len(out) >= max_items:
+                    break
+        return out
 
     def download(self, file_id: str) -> bytes:
         return self._request("GET", f"{API_BASE}/files/{file_id}/content", allow_redirects=True).content

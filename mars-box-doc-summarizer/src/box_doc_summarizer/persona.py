@@ -35,8 +35,9 @@ def welcome_message() -> str:
         "brief each one, and hand you one executive summary with a link to every file.\n\n"
         "I only save the summary back to Box after you say so. Deny keeps it in chat.\n\n"
         "Try one of these:\n"
-        "• Summarize folder 123456789\n"
-        "• Summarize https://app.box.com/folder/123456789\n"
+        "• List folders\n"
+        "• List files in Hawaii Trip\n"
+        "• Summarize Hawaii Trip (or a folder id or link)\n"
         "• Refresh (re-runs on the default folder)\n\n"
         "Or ask what I can do."
     )
@@ -45,12 +46,15 @@ def welcome_message() -> str:
 def help_message() -> str:
     return (
         "Here's how I work:\n\n"
-        "1. You name a Box folder (id or link), or I use the default folder.\n"
+        "• List folders: the folders shared with my Box service account (name and id).\n"
+        "• List files in <folder name or id>: what's in a folder, read through Box Mount. No summary, nothing written.\n"
+        "• Summarize <folder name or id>: the full run below.\n\n"
+        "1. You name a Box folder (name, id, or link), or I use the default folder.\n"
         "2. I read PDFs, Word, PowerPoint, Excel, Markdown, text, and CSV files, including subfolders.\n"
         "3. I brief each document and write one executive summary with a link per file.\n"
         "4. I ask before saving EXECUTIVE-SUMMARY.md into the folder. If it already exists, Box keeps the old version.\n\n"
         "I don't edit or delete your documents. Files I can't read show up as metadata only.\n\n"
-        "Say Summarize folder <id> to start."
+        "I only see folders shared with my service account. Say List folders to start."
     )
 
 
@@ -98,3 +102,54 @@ def written_message(filename: str, url: str) -> str:
 
 def write_failed_message(reason: str) -> str:
     return f"I couldn't save the summary to Box ({reason}). Nothing changed there. The summary is below.\n\n"
+
+
+def folders_message(folders: list[tuple[str, str]], truncated: bool) -> str:
+    if not folders:
+        return (
+            "I can't see any folders yet. I only see folders shared with my Box service account "
+            "(AutomationUser_…@boxdevedition.com). Invite it to a folder as an Editor and ask again."
+        )
+    lines = [f"• {path} (id {fid})" for path, fid in folders]
+    more = "\n\nThere are more; I stopped listing at the limit." if truncated else ""
+    return (
+        "Here are the folders shared with my Box service account. I can't see anything that isn't shared with it.\n\n"
+        + "\n".join(lines)
+        + more
+        + "\n\nSay List files in <name> or Summarize <name>."
+    )
+
+
+def _size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n} B"
+
+
+def files_message(folder_name: str, files: list[dict], mode: str) -> str:
+    if not files:
+        return f"{folder_name} is empty, or Box Mount hasn't synced anything yet."
+    lines = [f"• {f['path']} ({_size(int(f.get('size') or 0))}, {f.get('type') or 'file'})" for f in files]
+    via = "read through Box Mount" if mode == "mount" else "read through the Box API"
+    return (
+        f"{folder_name} has {len(files)} file{'s' if len(files) != 1 else ''} ({via}):\n\n"
+        + "\n".join(lines)
+        + f"\n\nNo summary written. Say Summarize {folder_name} when you want one."
+    )
+
+
+def ambiguous_folder_message(name: str, matches: list[tuple[str, str]]) -> str:
+    lines = "\n".join(f"• {path} (id {fid})" for path, fid in matches)
+    return f"More than one folder is called {name}. Which one?\n\n{lines}\n\nReply with the id."
+
+
+def no_folder_match_message(name: str, close: list[tuple[str, str]]) -> str:
+    if close:
+        lines = "\n".join(f"• {path} (id {fid})" for path, fid in close)
+        return f"I don't see a folder called {name}. Did you mean one of these?\n\n{lines}"
+    return (
+        f"I don't see a folder called {name}. I only see folders shared with my Box service account. "
+        "Say List folders to see them."
+    )

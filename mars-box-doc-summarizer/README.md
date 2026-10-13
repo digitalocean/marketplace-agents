@@ -35,7 +35,7 @@ Set `BOX_SHARED_LINK_ACCESS=open` to create public shared links for files that l
 | `BOX_MOUNT_SHA256` | env | | Required with the URL; download fails closed on mismatch |
 | `BOX_ALLOW_API_FALLBACK` | env | `0` | `1` allows API reads/writes if the mount fails |
 | `BOX_FOLDER_ID` | env | | Default folder for `Refresh` |
-| `BOX_MOUNT_PATH` | env | `/workspace/box` | |
+| `BOX_MOUNT_PATH` | env | `/workspace/box` | Each folder syncs to `$BOX_MOUNT_PATH/<folder_id>` |
 | `SUMMARY_FILENAME` | env | `EXECUTIVE-SUMMARY.md` | Excluded from inventory |
 | `MAX_FILES` / `MAX_DEPTH` / `MAX_CHARS_PER_DOC` / `MAX_FILE_BYTES` | env | 50 / 3 / 20000 / 25 MB | |
 | `BOX_SHARED_LINK_ACCESS` | env | empty | `open` creates public links |
@@ -55,7 +55,18 @@ Offline: no API key, no network, no binary (mocked Box client + fake `box-mount`
 ## MARS
 
 Spec: `specs/mars-box-doc-summarizer.yaml` (`size: mars-2vcpu-4gb`, `permissions.default: ask`).
-Webhook trigger: `specs/mars-box-doc-summarizer-trigger.yaml`. Chat: `Summarize folder 123456789`, `Refresh`, `help`.
+Webhook trigger: `specs/mars-box-doc-summarizer-trigger.yaml`.
+
+## Chat commands
+
+| Say | What happens |
+|-----|--------------|
+| `list folders` / `what folders can you see` | Read-only Box API listing (name + id) of folders visible to the App Access Only service account. Only folders shared with (or owned by) it appear |
+| `list files` / `list files in <name or id>` / `what's in <name or id>` | Name, size, type of each file, read through Box Mount (mount-primary rules; API only with `BOX_ALLOW_API_FALLBACK=1`). No summary, nothing written. Defaults to `BOX_FOLDER_ID` |
+| `summarize <name or id or link>` / `refresh` | Full run with approve before write-back; reply ends with the `Run mode:` footer |
+| `help` | What I can do |
+
+List commands win over summarize whenever the message says list/show/what's in, even with a folder id in it. Folder names resolve case-insensitively (name or path). If more than one folder matches, the agent lists them with ids and asks which one; if none match, it suggests close names.
 Programmatic input: `{"folder_id": "...", "auto_approve": false}`.
 
 ## Troubleshooting

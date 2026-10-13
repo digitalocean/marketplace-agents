@@ -41,19 +41,24 @@ def default_binary_path() -> Path:
     return Path(os.path.expanduser("~/.local/bin/box-mount"))
 
 
-def mount_path() -> str:
-    return os.environ.get("BOX_MOUNT_PATH", "/workspace/box")
+def mount_path(folder_id: str = "") -> str:
+    """One sync folder per Box folder: ``$BOX_MOUNT_PATH/<folder_id>``."""
+    base = os.environ.get("BOX_MOUNT_PATH", "/workspace/box").rstrip("/")
+    return f"{base}/{folder_id}" if folder_id else base
 
 
 def _run(binary: str, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
     return subprocess.run([binary, *args], capture_output=True, text=True, timeout=timeout)
 
 
-def _status_running(out: str, path: str) -> bool:
+def _status_running(out: str, path: str, folder_id: str = "") -> bool:
     """Box Mount 0.6.0: ``<dir> | box_folder_id=<id> | pid=<pid> | status=running``."""
     for line in out.splitlines():
-        if line.split("|")[0].strip() == path and "status=running" in line:
-            return True
+        if line.split("|")[0].strip() != path or "status=running" not in line:
+            continue
+        if folder_id and f"box_folder_id={folder_id}" not in line:
+            continue
+        return True
     return False
 
 
@@ -118,7 +123,7 @@ def _write_private(path: Path, text: str) -> None:
 def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None = None) -> MountResult:
     if not mount_enabled() and binary is None:
         return MountResult(ok=False, state="skipped", message="Box Mount not configured.")
-    target = mount_path()
+    target = mount_path(str(folder_id))
     bin_path = Path(binary) if binary else default_binary_path()
     steps: list[str] = []
 
@@ -135,7 +140,7 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
         if ver.returncode == 0 and ver.stdout.strip():
             steps.append(ver.stdout.strip().splitlines()[0][:40])
         status = _run(str(bin_path), "status")
-        if status.returncode == 0 and _status_running(status.stdout, target):
+        if status.returncode == 0 and _status_running(status.stdout, target, str(folder_id)):
             steps.append(f"mount already running at {target}")
             return MountResult(ok=True, state="reused", path=target, steps=steps)
 
@@ -166,7 +171,7 @@ def ensure_mount(folder_id: str, *, binary: str | None = None, home: str | None 
         deadline = time.time() + float(os.environ.get("BOX_MOUNT_SYNC_TIMEOUT_S", "300"))
         while time.time() < deadline:
             st = _run(str(bin_path), "status")
-            if st.returncode == 0 and _status_running(st.stdout, target):
+            if st.returncode == 0 and _status_running(st.stdout, target, str(folder_id)):
                 steps.append(f"status=running at {target}")
                 _wait_bootstrap(target, min(deadline, time.time() + float(os.environ.get("BOX_MOUNT_BOOTSTRAP_S", "30"))))
                 n = sum(1 for p in Path(target).rglob("*") if p.is_file() and not any(x.startswith(".") for x in p.relative_to(target).parts))

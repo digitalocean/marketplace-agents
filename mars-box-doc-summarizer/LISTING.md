@@ -9,7 +9,7 @@ It saves the summary back through the mount only after you say yes. Box Mount is
 
 ## Description
 
-Box Doc Summarizer is a chief-of-staff agent for anyone who inherits a shared Box folder full of documents and needs the gist fast. Name a folder in chat (`Summarize folder 123456789` or a Box folder link). It reads every PDF, Word, PowerPoint, Excel, Markdown, text, and CSV file, including subfolders, briefs each one, and writes a single executive summary: TL;DR, cross-document themes, a section per document, and a link back to each source file in Box.
+Box Doc Summarizer is a chief-of-staff agent for anyone who inherits a shared Box folder full of documents and needs the gist fast. Ask `list folders` to see what it can reach, then name a folder in chat by name, id, or link (`summarize Hawaii Trip`). It reads every PDF, Word, PowerPoint, Excel, Markdown, text, and CSV file, including subfolders, briefs each one, and writes a single executive summary: TL;DR, cross-document themes, a section per document, and a link back to each source file in Box.
 
 Before anything touches Box it asks **Write executive summary to Box?** Approve saves `EXECUTIVE-SUMMARY.md` into the folder (a new version if one already exists, so Box keeps history). Deny keeps the summary in chat only. It never edits or deletes your documents.
 
@@ -31,7 +31,7 @@ It runs on Box Mount (private preview, Linux only, no SLA): the agent downloads 
 2. Have a Box admin authorize the app (Admin Console, Platform Apps). Invite the app's service account (`AutomationUser_…@boxdevedition.com`) to your folder as an **Editor**.
 3. Create the agent with secret `BOX_JWT_CONFIG_JSON` set to the whole JSON file and `HARNESS_INFERENCE_API_KEY` set to your inference key. Optionally set env `BOX_FOLDER_ID` so `Refresh` works without an id, and `BOX_SHARED_LINK_ACCESS=open` if you want public links.
 4. Box Mount (private preview): request access from Box, then set secret `BOX_MOUNT_BINARY_URL` to a direct download of the Linux x86_64 build and env `BOX_MOUNT_SHA256` to its published checksum. Without the checksum the agent won't download the binary.
-5. Start a session and send `Summarize folder 123456789`. Read the preview, then approve or deny **Write executive summary to Box?**
+5. Start a session. Send `list folders` to see what the service account can reach, `list files in <folder>` to check what Box Mount synced, then `summarize <folder name or id>`. Read the preview, then approve or deny **Write executive summary to Box?**
 
 ```shell
 doctl harness-runtime triggers create \

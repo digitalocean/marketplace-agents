@@ -23,10 +23,10 @@ def install_fake_mount(tmp_path: Path, monkeypatch, *, fail: bool = False) -> Pa
     b.parent.mkdir(exist_ok=True)
     b.write_text(SCRIPT)
     b.chmod(0o755)
-    mount_dir = tmp_path / "box"
+    mount_dir = tmp_path / "box" / "111"  # per-folder sync dir under BOX_MOUNT_PATH
     monkeypatch.setenv("FAKE_BM_STATE", str(tmp_path / "bm-state"))
     monkeypatch.setenv("FAKE_BM_SRC", str(FIXTURE))
-    monkeypatch.setenv("BOX_MOUNT_PATH", str(mount_dir))
+    monkeypatch.setenv("BOX_MOUNT_PATH", str(tmp_path / "box"))
     monkeypatch.setenv("BOX_MOUNT_BINARY_URL", "https://example.invalid/box-mount.tar.gz")
     monkeypatch.setenv("BOX_JWT_CONFIG_JSON", "{}")
     monkeypatch.setenv("BOX_MOUNT_BOOTSTRAP_S", "2")

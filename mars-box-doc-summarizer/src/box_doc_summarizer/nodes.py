@@ -15,14 +15,18 @@ from langchain_core.messages import AIMessage, HumanMessage
 from box_doc_summarizer import box_api, box_mount
 from box_doc_summarizer.extractors import extract_bytes, is_supported
 from box_doc_summarizer.hygiene import hygiene_text
-from box_doc_summarizer.intent import classify_intent, parse_folder_id
+from box_doc_summarizer.intent import classify_intent, parse_folder_id, parse_folder_name
 from box_doc_summarizer.llm import chat_completion, harness_env_available, last_error, parse_json_object
 from box_doc_summarizer.persona import (
     BRIEF_INSTRUCTIONS,
     SYNTH_INSTRUCTIONS,
     SYSTEM_PROMPT,
+    ambiguous_folder_message,
     ask_body,
     ask_title,
+    files_message,
+    folders_message,
+    no_folder_match_message,
     blocked_message,
     denied_message,
     empty_message,
@@ -109,6 +113,35 @@ def _skip_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _visible_folders() -> tuple[list[Any], bool]:
+    limit = _int_env("MAX_LIST_FOLDERS", 200)
+    items = box_api.get_box_client().list_folders("0", max_depth=_int_env("MAX_FOLDER_DEPTH", 3), max_items=limit)
+    return items, len(items) >= limit
+
+
+def resolve_folder_name(name: str) -> tuple[str, str]:
+    """Return (folder_id, reply_if_unresolved). Case-insensitive on folder name or path."""
+    import difflib
+
+    if not box_api.box_api_configured():
+        return "", f"I can't look up folder names without BOX_JWT_CONFIG_JSON. Send the folder id instead."
+    try:
+        folders, _ = _visible_folders()
+    except Exception as exc:  # noqa: BLE001
+        return "", f"I couldn't list folders ({str(exc)[:160]}). Send the folder id instead."
+    key = name.strip().lower()
+    exact = [f for f in folders if f.name.lower() == key or f.path.lower() == key]
+    if len(exact) == 1:
+        return exact[0].id, ""
+    if len(exact) > 1:
+        return "", ambiguous_folder_message(name, [(f.path, f.id) for f in exact])
+    names = {f.name.lower(): f for f in folders}
+    close = difflib.get_close_matches(key, list(names), n=5, cutoff=0.5)
+    contains = [f for f in folders if key in f.name.lower() and f.name.lower() not in close]
+    picks = [names[c] for c in close] + contains[: max(0, 5 - len(close))]
+    return "", no_folder_match_message(name, [(f.path, f.id) for f in picks])
+
+
 def intake(state: SummarizerState) -> dict[str, Any]:
     text = _human_text(state.get("messages"))
     fixture = (state.get("fixture_path") or "").strip()
@@ -116,9 +149,11 @@ def intake(state: SummarizerState) -> dict[str, Any]:
 
     if fixture or folder_id:
         intent = "summarize"
+        folder_name = ""
     else:
         intent = classify_intent(text)
         folder_id = parse_folder_id(text)
+        folder_name = parse_folder_name(text)
 
     if intent == "help":
         return {"intent": "help", "status": "help", **_reply(help_message())}
@@ -127,23 +162,41 @@ def intake(state: SummarizerState) -> dict[str, Any]:
         if text.strip() and harness_env_available() and len(text.split()) > 2:
             reply = chat_completion(SYSTEM_PROMPT, text, max_tokens=300)
         return {"intent": "chat", "status": "chat", **_reply(reply or welcome_message())}
+    if intent == "list_folders":
+        if not box_api.box_api_configured():
+            return {"intent": intent, "status": "blocked", **_reply(blocked_message("BOX_JWT_CONFIG_JSON is not set."))}
+        try:
+            folders, truncated = _visible_folders()
+        except Exception as exc:  # noqa: BLE001
+            return {"intent": intent, "status": "blocked", **_reply(blocked_message(str(exc)[:300]))}
+        return {
+            "intent": intent,
+            "status": "listed",
+            "stage_summaries": _append(state, f"list_folders: {len(folders)} via Box API (read-only)"),
+            **_reply(folders_message([(f.path, f.id) for f in folders], truncated)),
+        }
+
+    if not folder_id and folder_name:
+        folder_id, unresolved = resolve_folder_name(folder_name)
+        if unresolved:
+            return {"intent": "chat", "status": "chat", **_reply(unresolved)}
 
     folder_id = folder_id or os.environ.get("BOX_FOLDER_ID", "").strip()
     if not folder_id and not fixture:
         return {"intent": "chat", "status": "chat", **_reply(missing_folder_message())}
 
     return {
-        "intent": "summarize",
+        "intent": intent,
         "folder_id": folder_id,
         "fixture_path": fixture,
         "documents": [],
         "skipped": [],
-        "stage_summaries": _append(state, f"intake: folder {folder_id or 'fixture'}"),
+        "stage_summaries": _append(state, f"intake: {intent} folder {folder_id or 'fixture'}"),
     }
 
 
 def route_after_intake(state: SummarizerState) -> str:
-    return "connect" if state.get("intent") == "summarize" else "end"
+    return "connect" if state.get("intent") in {"summarize", "list_files"} else "end"
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +274,40 @@ def connect(state: SummarizerState) -> dict[str, Any]:
 
 
 def route_after_connect(state: SummarizerState) -> str:
-    return "report" if state.get("status") == "blocked" else "inventory"
+    if state.get("status") == "blocked":
+        return "report"
+    return "list_files" if state.get("intent") == "list_files" else "inventory"
+
+
+def list_files(state: SummarizerState) -> dict[str, Any]:
+    """Read-only listing of the connected folder (mount path or explicit API mode)."""
+    mode = state.get("source_mode") or ""
+    files: list[dict[str, Any]] = []
+    if mode == "api":
+        try:
+            for i in box_api.get_box_client().list_files(state["folder_id"], max_depth=_int_env("MAX_DEPTH", 3)):
+                if not _skip_name(i.path) or i.path == summary_filename():
+                    files.append({"path": i.path, "size": i.size})
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "blocked", "blocked_reason": str(exc)[:300], **_reply(blocked_message(str(exc)[:300]))}
+    else:
+        root = Path(state["local_root"])
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root).as_posix()
+            if any(part.startswith(".") for part in rel.split("/")):
+                continue
+            files.append({"path": rel, "size": p.stat().st_size})
+    for f in files:
+        ext = os.path.splitext(f["path"])[1].lstrip(".").lower()
+        f["type"] = ext or "file"
+    name = state.get("folder_name") or f"folder {state.get('folder_id')}"
+    return {
+        "status": "listed",
+        "stage_summaries": _append(state, f"list_files: {len(files)} files (source_mode={mode})"),
+        **_reply(files_message(name, files, mode)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -650,7 +736,7 @@ def report(state: SummarizerState) -> dict[str, Any]:
         status = "denied" if state.get("decision") == "deny" else "summarized"
         text = (denied_message() if status == "denied" else "") + md
     mode = state.get("source_mode") or ""
-    if mode and status not in {"chat", "help"}:
+    if mode and status not in {"chat", "help"} and state.get("intent") == "summarize":
         footer = f"Run mode: {mode}"
         if mode == "mount":
             steps = "; ".join(state.get("mount_steps") or [])
@@ -678,3 +764,4 @@ synthesize_node = _mars_node(synthesize)
 ask_node = _mars_node(ask)
 write_back_node = _mars_node(write_back)
 report_node = _mars_node(report)
+list_files_node = _mars_node(list_files)

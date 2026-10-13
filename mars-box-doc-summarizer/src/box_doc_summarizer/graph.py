@@ -14,6 +14,7 @@ from box_doc_summarizer.nodes import (
     intake_node,
     inventory_node,
     links_node,
+    list_files_node,
     report_node,
     route_after_ask,
     route_after_connect,
@@ -38,11 +39,12 @@ def build_graph() -> StateGraph:
         ("ask", ask_node),
         ("write_back", write_back_node),
         ("report", report_node),
+        ("list_files", list_files_node),
     ]:
         b.add_node(name, fn)
     b.add_edge(START, "intake")
     b.add_conditional_edges("intake", route_after_intake, {"end": END, "connect": "connect"})
-    b.add_conditional_edges("connect", route_after_connect, {"report": "report", "inventory": "inventory"})
+    b.add_conditional_edges("connect", route_after_connect, {"report": "report", "inventory": "inventory", "list_files": "list_files"})
     b.add_conditional_edges("inventory", route_after_inventory, {"report": "report", "extract": "extract"})
     b.add_edge("extract", "brief")
     b.add_edge("brief", "links")
@@ -51,6 +53,7 @@ def build_graph() -> StateGraph:
     b.add_conditional_edges("ask", route_after_ask, {"write_back": "write_back", "report": "report"})
     b.add_edge("write_back", "report")
     b.add_edge("report", END)
+    b.add_edge("list_files", END)
     return b
 
 

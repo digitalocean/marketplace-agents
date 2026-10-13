@@ -51,7 +51,7 @@ def test_mount_writes_private_config(fake_bin, tmp_path, monkeypatch):
     import json
 
     assert json.loads(cfg.read_text()) == {"auth_type": "jwt", "jwt_config_path": str(jwt_file)}
-    assert (tmp_path / "box" / "doc.md").exists()
+    assert (tmp_path / "box" / "123" / "doc.md").exists()
     again = box_mount.ensure_mount("123", binary=str(fake_bin), home=str(tmp_path / "home"))
     assert again.state == "reused"
 
