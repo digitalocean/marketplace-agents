@@ -582,6 +582,7 @@ def write_back(state: SummarizerState) -> dict[str, Any]:
     md = state.get("summary_md") or ""
     name = summary_filename()
     mode = state.get("source_mode")
+    synced = False
     try:
         if mode == "api":
             item = box_api.get_box_client().upload_text(
@@ -593,6 +594,18 @@ def write_back(state: SummarizerState) -> dict[str, Any]:
                 "written_url": item.url,
                 "stage_summaries": _append(state, f"write_back: box file {item.id}"),
             }
+        daemon_note = ""
+        if mode == "mount":
+            # The HITL interrupt ends the run; MARS may reap the sync daemon
+            # before resume. Re-check and restart (box-mount mount restarts).
+            res = box_mount.ensure_mount(state.get("folder_id") or "")
+            if not res.ok:
+                return {
+                    "status": "write_failed",
+                    "write_error": f"Box Mount not running at write time: {res.message}",
+                    "stage_summaries": _append(state, "write_back: mount not running; nothing written"),
+                }
+            daemon_note = f"daemon {res.state}; "
         target_dir = Path(state.get("write_dir") or state.get("local_root") or ".")
         target = target_dir / name
         # In-place write (no temp+rename) so Box Mount keeps version history.
@@ -602,14 +615,15 @@ def write_back(state: SummarizerState) -> dict[str, Any]:
         note = f"write_back: {target}"
         if mode == "mount":
             url = state.get("folder_url") or url
-            note = f"write_back: wrote {target} via mount"
+            note = f"write_back: {daemon_note}wrote {target} via mount"
             synced = _wait_mount_upload(state.get("folder_id") or "", name, md)
             if synced:
                 url = synced
                 note += f"; synced to Box ({synced})"
-            elif box_api.box_api_configured():
-                note += "; Box sync not confirmed before timeout"
+            else:
+                note += "; Box sync NOT confirmed before timeout"
         return {
+            "mount_synced": bool(mode == "mount" and synced),
             "status": "written",
             "written_path": str(target),
             "written_url": url,
@@ -626,6 +640,8 @@ def report(state: SummarizerState) -> dict[str, Any]:
         text = blocked_message(state.get("blocked_reason") or "unknown error")
     elif status == "empty":
         text = empty_message(state.get("folder_name") or "That folder")
+    elif status == "written" and state.get("source_mode") == "mount" and not state.get("mount_synced"):
+        text = f"I wrote {summary_filename()} into the mounted folder, but Box hasn't confirmed the upload yet. Check the folder in a minute: {state.get('folder_url') or ''}\n\n" + md
     elif status == "written":
         text = written_message(summary_filename(), state.get("written_url") or "") + md
     elif status == "write_failed":
@@ -640,7 +656,9 @@ def report(state: SummarizerState) -> dict[str, Any]:
             steps = "; ".join(state.get("mount_steps") or [])
             footer += f" ({state.get('mount_state') or ''}{': ' + steps if steps else ''})"
         if status == "written" and mode == "mount":
-            footer += ". Summary written through the mount" + (", synced to Box." if "app.box.com" in (state.get("written_url") or "") else ".")
+            footer += ". Summary written through the mount" + (
+                ", upload to Box confirmed." if state.get("mount_synced") else ", but the upload to Box was not confirmed yet."
+            )
         text = text.rstrip() + "\n\n" + footer
     return {
         "status": status,

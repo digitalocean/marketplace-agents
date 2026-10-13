@@ -124,7 +124,29 @@ def test_mount_mode_end_to_end(tmp_path, monkeypatch):
     notes = " | ".join(out["stage_summaries"])
     assert "source_mode=mount" in notes and "read from mount path" in notes
     assert "via mount; synced to Box" in notes
-    assert "Run mode: mount" in _last_ai(out)
+    assert "Run mode: mount" in _last_ai(out) and "upload to Box confirmed" in _last_ai(out)
+    assert out["mount_synced"] is True
+
+
+def test_mount_daemon_restarted_before_write(tmp_path, monkeypatch):
+    mount_dir = install_fake_mount(tmp_path, monkeypatch)
+    box_api.set_box_client_factory(lambda: FakeBoxClient(root=mount_dir if mount_dir.exists() else FIXTURE))
+    g = compile_graph(MemorySaver())
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex}}
+    g.invoke({"folder_id": "111"}, cfg)
+    (tmp_path / "bm-state").unlink()  # simulate MARS reaping the daemon during the ask
+    out = g.invoke(Command(resume="approve"), cfg)
+    notes = " | ".join(out["stage_summaries"])
+    assert "write_back: daemon mounted;" in notes and out["mount_synced"] is True
+
+
+def test_mount_unconfirmed_upload_is_reported_honestly(tmp_path, monkeypatch):
+    install_fake_mount(tmp_path, monkeypatch)
+    monkeypatch.setenv("BOX_MOUNT_UPLOAD_WAIT_S", "1")
+    box_api.set_box_client_factory(lambda: FakeBoxClient())  # Box never sees the new file
+    out, _ = _run({"folder_id": "111"}, "approve")
+    text = _last_ai(out)
+    assert out["mount_synced"] is False and "not confirmed" in text and "Saved EXECUTIVE-SUMMARY.md" not in text
 
 
 def test_mount_failure_blocks_without_flag(tmp_path, monkeypatch):

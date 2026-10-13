@@ -26,6 +26,7 @@ class OutputState(TypedDict, total=False):
     written_url: str
     mount_state: str
     mount_steps: list[str]
+    mount_synced: bool
     source_mode: str
     links_note: str
     llm_note: str
@@ -45,6 +46,7 @@ class SummarizerState(TypedDict, total=False):
     source_mode: str  # api | mount | fixture
     mount_state: str
     mount_steps: list[str]
+    mount_synced: bool
     local_root: str
     blocked_reason: str
     documents: list[dict[str, Any]]
