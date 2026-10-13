@@ -284,6 +284,7 @@ python3 scripts/upload_listing_logo.py <appId> listings/<slug>.md
 | Nightly Repo Audit | `814d8a64ff9c8bc30d8ca0af` | `nightly-repo-audit` | `mars-nightly-repo-audit` |
 | Competitor Pulse | `9557dfbccd5bafca7811aec2` | `competitor-pulse` | `mars-competitor-pulse` |
 | Ghost Writer | `4e4673e65050028cb571650a` | `ghost-writer` | `mars-ghost-writer` |
+| Box Doc Summarizer | `b817d1872667358d5664a253` | `box-doc-summarizer` | `mars-box-doc-summarizer` |
 
 ---
 

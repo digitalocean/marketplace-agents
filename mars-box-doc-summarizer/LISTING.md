@@ -1,4 +1,4 @@
-logo: https://github.com/digitalocean/marketplace-agents/raw/main/listings/assets/box-doc-summarizer.svg
+logo: https://github.com/digitalocean/marketplace-agents/raw/dd89dd6bfe71fd00818cb9528a6c756ceea0895e/listings/assets/box-doc-summarizer.svg
 
 # Box Doc Summarizer
 
