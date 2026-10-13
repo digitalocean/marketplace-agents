@@ -1,4 +1,4 @@
-logo: https://github.com/digitalocean/marketplace-agents/raw/main/listings/assets/box-doc-summarizer.svg
+logo: https://github.com/digitalocean/marketplace-agents/raw/dd89dd6bfe71fd00818cb9528a6c756ceea0895e/listings/assets/box-doc-summarizer.svg
 
 # Box Doc Summarizer
 
@@ -29,8 +29,8 @@ It runs on Box Mount (private preview, Linux only, no SLA): the agent downloads 
 
 1. In the Box Developer Console create a **Custom App** with **Server Authentication (with JWT)**, App Access Only, scope **Read and write all files and folders**. Generate a keypair and download the JWT config JSON.
 2. Have a Box admin authorize the app (Admin Console, Platform Apps). Invite the app's service account (`AutomationUser_…@boxdevedition.com`) to your folder as an **Editor**.
-3. Create the agent with secret `BOX_JWT_CONFIG_JSON` set to the whole JSON file and `HARNESS_INFERENCE_API_KEY` set to your inference key. Optionally set env `BOX_FOLDER_ID` so `Refresh` works without an id, and `BOX_SHARED_LINK_ACCESS=open` if you want public links.
-4. Box Mount (private preview): request access from Box, then set secret `BOX_MOUNT_BINARY_URL` to a direct download of the Linux x86_64 build and env `BOX_MOUNT_SHA256` to its published checksum. Without the checksum the agent won't download the binary.
+3. Create the agent with secret `BOX_JWT_CONFIG_JSON` set to the whole JSON file and `HARNESS_INFERENCE_API_KEY` set to your inference key. You do not need `BOX_FOLDER_ID` for chat: use `list folders`, then `summarize <folder name or id>`. Set `BOX_FOLDER_ID` only for webhook `Refresh` or triggers with no folder in the prompt. Optionally set `BOX_SHARED_LINK_ACCESS=open` for public links.
+4. Box Mount (private preview): request access from Box. The Marketplace manifest and doctl spec include env `BOX_MOUNT_BINARY_URL` (direct download) and `BOX_MOUNT_SHA256`; without the checksum the agent won't download the binary.
 5. Start a session. Send `list folders` to see what the service account can reach, `list files in <folder>` to check what Box Mount synced, then `summarize <folder name or id>`. Read the preview, then approve or deny **Write executive summary to Box?**
 
 ```shell
@@ -53,4 +53,4 @@ Point a Box webhook (FILE.UPLOADED on the folder) at the trigger URL so a new fi
 - OpenAI-compatible inference provider (DigitalOcean Gradient / Inference recommended)
 - A Box JWT app authorized by a Box admin, with its service account invited to the folder
 - Required secret `BOX_JWT_CONFIG_JSON`
-- Box Mount private preview access, a direct binary URL (`BOX_MOUNT_BINARY_URL`) and its `BOX_MOUNT_SHA256`; Linux only, no SLA, 5 GB / 10,000 files per mount
+- Box Mount private preview access (Linux only, no SLA, 5 GB / 10,000 files per mount); the listing includes `BOX_MOUNT_BINARY_URL` and `BOX_MOUNT_SHA256` defaults

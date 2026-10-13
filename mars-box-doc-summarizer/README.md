@@ -31,7 +31,7 @@ Set `BOX_SHARED_LINK_ACCESS=open` to create public shared links for files that l
 |------|------|---------|-------|
 | `HARNESS_INFERENCE_API_KEY` | secret | | Briefs + TL;DR via direct HTTP `stream:false`; heuristics offline |
 | `BOX_JWT_CONFIG_JSON` | secret | | Developer Console JWT config (whole file) |
-| `BOX_MOUNT_BINARY_URL` | secret | | Box Mount build URL (required for the demo) |
+| `BOX_MOUNT_BINARY_URL` | env | (in spec) | Box Mount build direct-download URL (required for the demo) |
 | `BOX_MOUNT_SHA256` | env | | Required with the URL; download fails closed on mismatch |
 | `BOX_ALLOW_API_FALLBACK` | env | `0` | `1` allows API reads/writes if the mount fails |
 | `BOX_FOLDER_ID` | env | | Default folder for `Refresh` |
