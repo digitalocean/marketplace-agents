@@ -23,6 +23,7 @@ _LIST_FILES_RE = re.compile(
     r"\b(list|show)\b[^.?!]*\b(files?|docs?|documents?|contents?)\b|\bwhat(?:'|’)?s\s+in\b|\bwhat is in\b|\bcontents of\b",
     re.I,
 )
+_LIST_ANY_RE = re.compile(r"\b(list|show|what(?:'|’)?s in|what is in)\b", re.I)
 _NAME_AFTER_RE = re.compile(
     r"(?:summari[sz]e|brief|digest|run|refresh|list files in|list files for|list documents in|"
     r"show files in|show me what(?:'|’)?s in|what(?:'|’)?s in|what is in|contents of|files in)\s+"
@@ -67,6 +68,8 @@ def classify_intent(text: str) -> str:
         return "list_folders"
     if _LIST_FILES_RE.search(t):
         return "list_files"
+    if _LIST_ANY_RE.search(t):
+        return "chat"  # list/show phrasing never triggers a summary run
     if parse_folder_id(t) or _SUMMARIZE_RE.search(t):
         return "summarize"
     return "chat"

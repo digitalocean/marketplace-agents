@@ -59,6 +59,9 @@ Webhook trigger: `specs/mars-box-doc-summarizer-trigger.yaml`.
 
 ## Chat commands
 
+Intake is a conversational LLM agent (DO Serverless Inference, OpenAI-compatible tool calling, with the public-endpoint retry on 401). It chats naturally with multi-turn context and calls three tools: `list_folders` (read-only, resolves names), `list_files(folder)` and `summarize_folder(folder)`. Only an explicit summary request starts a summary run, and that run still stops at the approval interrupt before anything is written. `BOX_FOLDER_ID` is used only when you ask to summarize (or list files) without naming a folder. Per-run inputs (`folder_id`, `fixture_path`) are cleared at the end of every run, so a later chat turn on the same thread never inherits them. When the LLM is unavailable, a regex fallback handles the commands below; list/show phrasing never routes to a summary.
+
+
 | Say | What happens |
 |-----|--------------|
 | `list folders` / `what folders can you see` | Read-only Box API listing (name + id) of folders visible to the App Access Only service account. Only folders shared with (or owned by) it appear |

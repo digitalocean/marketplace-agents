@@ -58,20 +58,55 @@ def chat_completion(
     if not harness_env_available():
         _fail("no API key (or BOX_SUMMARIZER_LLM=0)")
         return None
+    msg = _post(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        max_tokens=max_tokens, temperature=temperature, timeout=timeout,
+    )
+    content = ((msg or {}).get("content") or "").strip()
+    if msg is not None and not content:
+        _fail("empty content")
+        return None
+    return content or None
+
+
+def chat_with_tools(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    max_tokens: int = 800,
+    temperature: float = 0.3,
+    timeout: float = 60.0,
+) -> dict[str, Any] | None:
+    """OpenAI-compatible tool calling. Returns the assistant message dict
+    (``content`` and/or ``tool_calls``) or None when the LLM is unavailable."""
+    if not harness_env_available():
+        _fail("no API key (or BOX_SUMMARIZER_LLM=0)")
+        return None
+    return _post(messages, tools=tools, max_tokens=max_tokens, temperature=temperature, timeout=timeout)
+
+
+def _post(
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    max_tokens: int,
+    temperature: float,
+    timeout: float,
+) -> dict[str, Any] | None:
     import requests
 
     env = resolve_llm_env()
     url = (env["base_url"] or DEFAULT_BASE_URL).rstrip("/") + "/chat/completions"
     payload: dict[str, Any] = {
         "model": env["model"],
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
     }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     headers = {"Authorization": f"Bearer {env['api_key']}", "Content-Type": "application/json"}
     body = json.dumps(payload)
     urls = [url]
@@ -92,12 +127,12 @@ def chat_completion(
                     continue
                 break
             choice = resp.json()["choices"][0]
-            content = (choice["message"].get("content") or "").strip()
-            if not content:
+            msg = dict(choice.get("message") or {})
+            if not (msg.get("content") or "").strip() and not msg.get("tool_calls"):
                 reasons.append(f"empty content (finish_reason={choice.get('finish_reason')})")
                 break
             LAST_ERROR["reason"] = ""
-            return content
+            return msg
         except Exception as exc:  # noqa: BLE001 — offline fallback is the contract
             reasons.append(type(exc).__name__)
             break

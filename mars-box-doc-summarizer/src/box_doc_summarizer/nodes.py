@@ -13,6 +13,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 from box_doc_summarizer import box_api, box_mount
+from box_doc_summarizer.agent import run_agent
 from box_doc_summarizer.extractors import extract_bytes, is_supported
 from box_doc_summarizer.hygiene import hygiene_text
 from box_doc_summarizer.intent import classify_intent, parse_folder_id, parse_folder_name
@@ -142,57 +143,106 @@ def resolve_folder_name(name: str) -> tuple[str, str]:
     return "", no_folder_match_message(name, [(f.path, f.id) for f in picks])
 
 
-def intake(state: SummarizerState) -> dict[str, Any]:
-    text = _human_text(state.get("messages"))
-    fixture = (state.get("fixture_path") or "").strip()
-    folder_id = (state.get("folder_id") or "").strip()
+_CLEAR = {"folder_id": "", "fixture_path": ""}  # per-run inputs never leak into the next chat turn
 
-    if fixture or folder_id:
-        intent = "summarize"
-        folder_name = ""
-    else:
-        intent = classify_intent(text)
-        folder_id = parse_folder_id(text)
-        folder_name = parse_folder_name(text)
 
-    if intent == "help":
-        return {"intent": "help", "status": "help", **_reply(help_message())}
-    if intent == "chat":
-        reply = None
-        if text.strip() and harness_env_available() and len(text.split()) > 2:
-            reply = chat_completion(SYSTEM_PROMPT, text, max_tokens=300)
-        return {"intent": "chat", "status": "chat", **_reply(reply or welcome_message())}
-    if intent == "list_folders":
-        if not box_api.box_api_configured():
-            return {"intent": intent, "status": "blocked", **_reply(blocked_message("BOX_JWT_CONFIG_JSON is not set."))}
-        try:
-            folders, truncated = _visible_folders()
-        except Exception as exc:  # noqa: BLE001
-            return {"intent": intent, "status": "blocked", **_reply(blocked_message(str(exc)[:300]))}
-        return {
-            "intent": intent,
-            "status": "listed",
-            "stage_summaries": _append(state, f"list_folders: {len(folders)} via Box API (read-only)"),
-            **_reply(folders_message([(f.path, f.id) for f in folders], truncated)),
-        }
+def _pending_human_text(messages: list[Any] | None) -> str:
+    """Text of the newest message only if it is a user turn not yet answered."""
+    if not messages:
+        return ""
+    last = messages[-1]
+    if isinstance(last, HumanMessage) or (
+        isinstance(last, dict) and (last.get("type") or last.get("role") or "").lower() in {"human", "user"}
+    ):
+        return _human_text([last])
+    return ""
 
-    if not folder_id and folder_name:
-        folder_id, unresolved = resolve_folder_name(folder_name)
-        if unresolved:
-            return {"intent": "chat", "status": "chat", **_reply(unresolved)}
 
-    folder_id = folder_id or os.environ.get("BOX_FOLDER_ID", "").strip()
+def _folder_rows() -> list[tuple[str, str]]:
+    if not box_api.box_api_configured():
+        raise RuntimeError("BOX_JWT_CONFIG_JSON is not set, so I can't see Box folders")
+    folders, _ = _visible_folders()
+    return [(f.path, f.id) for f in folders]
+
+
+def _chat(state: SummarizerState, text: str, notes: list[str] | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {"intent": "chat", "status": "chat", **_CLEAR, **_reply(text)}
+    if notes:
+        out["stage_summaries"] = [*(state.get("stage_summaries") or []), *notes]
+    return out
+
+
+def _start(state: SummarizerState, intent: str, folder_ref: str, fixture: str, default: str, notes: list[str]) -> dict[str, Any]:
+    """Resolve a folder reference (id or name) and hand off to connect."""
+    ref = (folder_ref or "").strip()
+    folder_id = ""
+    if ref.isdigit():
+        folder_id = ref
+    elif ref:
+        folder_id = parse_folder_id(ref)
+        if not folder_id:
+            folder_id, unresolved = resolve_folder_name(ref)
+            if unresolved:
+                return _chat(state, unresolved, notes)
+    folder_id = folder_id or default
     if not folder_id and not fixture:
-        return {"intent": "chat", "status": "chat", **_reply(missing_folder_message())}
-
+        return _chat(state, missing_folder_message(), notes)
     return {
         "intent": intent,
         "folder_id": folder_id,
-        "fixture_path": fixture,
+        "fixture_path": fixture if (fixture and (not ref or folder_id == default)) else "",
         "documents": [],
         "skipped": [],
-        "stage_summaries": _append(state, f"intake: {intent} folder {folder_id or 'fixture'}"),
+        "status": "",
+        "stage_summaries": [*(state.get("stage_summaries") or []), *notes, f"intake: {intent} folder {folder_id or 'fixture'}"],
     }
+
+
+def _offline_intake(state: SummarizerState, text: str, fixture: str, default: str) -> dict[str, Any]:
+    """Regex fallback when the LLM is unavailable. List/show never summarizes."""
+    note = [f"intake: offline regex fallback ({last_error() or 'LLM unavailable'})"]
+    intent = classify_intent(text)
+    if intent == "help":
+        return {"intent": "help", "status": "help", **_CLEAR, **_reply(help_message())}
+    if intent == "chat":
+        return _chat(state, welcome_message(), note)
+    if intent == "list_folders":
+        try:
+            rows = _folder_rows()
+        except Exception as exc:  # noqa: BLE001
+            return {"intent": intent, "status": "blocked", **_CLEAR, **_reply(blocked_message(str(exc)[:300]))}
+        return {
+            "intent": intent,
+            "status": "listed",
+            **_CLEAR,
+            "stage_summaries": _append(state, f"list_folders: {len(rows)} via Box API (read-only)"),
+            **_reply(folders_message(rows, len(rows) >= _int_env("MAX_LIST_FOLDERS", 200))),
+        }
+    ref = parse_folder_id(text) or parse_folder_name(text)
+    return _start(state, intent, ref, fixture, default, note)
+
+
+def intake(state: SummarizerState) -> dict[str, Any]:
+    messages = state.get("messages")
+    text = _pending_human_text(messages)
+    fixture = (state.get("fixture_path") or "").strip()
+    input_folder = (state.get("folder_id") or "").strip()  # this run's input only (cleared after each run)
+    default = input_folder or os.environ.get("BOX_FOLDER_ID", "").strip()
+
+    if not text.strip():
+        # Programmatic run (trigger / webhook / fixture) with no chat turn.
+        if fixture or input_folder:
+            return _start(state, "summarize", input_folder, fixture, default, [])
+        return {"intent": "chat", "status": "chat", **_CLEAR, **_reply(welcome_message())}
+
+    if not harness_env_available():
+        return _offline_intake(state, text, fixture, default)
+    res = run_agent(messages, list_folders_fn=_folder_rows, default_folder=default)
+    if res.action == "offline":
+        return _offline_intake(state, text, fixture, default)
+    if res.action == "reply":
+        return _chat(state, res.reply or welcome_message(), res.notes)
+    return _start(state, res.action, res.folder, fixture, default, res.notes)
 
 
 def route_after_intake(state: SummarizerState) -> str:
@@ -289,7 +339,7 @@ def list_files(state: SummarizerState) -> dict[str, Any]:
                 if not _skip_name(i.path) or i.path == summary_filename():
                     files.append({"path": i.path, "size": i.size})
         except Exception as exc:  # noqa: BLE001
-            return {"status": "blocked", "blocked_reason": str(exc)[:300], **_reply(blocked_message(str(exc)[:300]))}
+            return {"status": "blocked", "blocked_reason": str(exc)[:300], **_CLEAR, **_reply(blocked_message(str(exc)[:300]))}
     else:
         root = Path(state["local_root"])
         for p in sorted(root.rglob("*")):
@@ -305,6 +355,7 @@ def list_files(state: SummarizerState) -> dict[str, Any]:
     name = state.get("folder_name") or f"folder {state.get('folder_id')}"
     return {
         "status": "listed",
+        **_CLEAR,
         "stage_summaries": _append(state, f"list_files: {len(files)} files (source_mode={mode})"),
         **_reply(files_message(name, files, mode)),
     }
@@ -749,6 +800,7 @@ def report(state: SummarizerState) -> dict[str, Any]:
     return {
         "status": status,
         "human_summary": text,
+        **_CLEAR,
         "stage_summaries": _append(state, f"report: complete (source_mode={mode or 'n/a'})"),
         **_reply(text),
     }
