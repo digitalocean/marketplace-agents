@@ -9,7 +9,7 @@ import re
 
 _EMDASH_RE = re.compile(r"\s*[—–]\s*")
 _RANGE_DASH_RE = re.compile(r"(\d)\s*[–—]\s*([$€£]?\d)")
-_WORD_RANGE_RE = re.compile(r"(\w)[–—](\w)")
+_WORD_RANGE_RE = re.compile(r"(\w)–(\w)")
 _DOUBLE_HYPHEN_RE = re.compile(r"\s+--\s+")
 _DOUBLED_COMMA_RE = re.compile(r",\s*,+")
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*\n?.*?```", re.DOTALL | re.IGNORECASE)
