@@ -28,7 +28,7 @@ doctl agent create \
 doctl agent launch competitor-pulse
 ```
 
-`doctl agent` is an alias of `doctl harness-runtime`. Specs for all four agents live under `specs/`.
+`doctl agent` is an alias of `doctl harness-runtime`. Specs for all five agents live under `specs/`.
 
 ## MARS pin (per agent)
 
