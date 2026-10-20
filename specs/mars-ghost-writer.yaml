@@ -1,4 +1,7 @@
 name: mars-ghost-writer
+labels:
+  marketplace.digitalocean.com/listing: ghost-writer
+  marketplace.digitalocean.com/source: doctl
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb

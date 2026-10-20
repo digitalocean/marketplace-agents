@@ -1,4 +1,7 @@
 name: mars-sourced-research-desk
+labels:
+  marketplace.digitalocean.com/listing: sourced-research-desk
+  marketplace.digitalocean.com/source: doctl
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb

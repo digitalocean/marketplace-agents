@@ -56,6 +56,7 @@ Copy `specs/mars-<similar>.yaml` → `specs/mars-<slug>.yaml`. Set:
 - `FRAMEWORK_REPO`: `https://github.com/digitalocean/marketplace-agents.git`
 - `FRAMEWORK_REPO_SHA`: `<exact-commit-sha>` after merge (placeholder until then)
 - `FRAMEWORK_SUBDIR`: `mars-<slug>`
+- **`labels:`** — [Analytics labels](../../AGENTS.md#analytics-labels): `listing` = `<slug>` (`safe_name`), `source: doctl`
 - Inference env + `HARNESS_INFERENCE_API_KEY` secret
 - Agent-specific env, secrets, `tools`, `permissions.rules` as needed
 
@@ -89,8 +90,9 @@ Before Marketplace submit:
 - [ ] MIT-compatible license
 - [ ] `langgraph.json` registers `agent`
 - [ ] `requirements.txt` uses `-e ./mars-<slug>/`
-- [ ] Spec is doctl-createable
-- [ ] Listing has Summary + Description; logo/gettingStarted rules per AGENTS.md
+- [ ] Spec is doctl-createable and includes marketplace **`labels:`**
+- [ ] `listings/<slug>.md` filename equals `safe_name`; Summary + Description; logo/gettingStarted rules per AGENTS.md
+- [ ] Row added to AGENTS.md **Existing listings** table (`safe_name`, subdir)
 - [ ] Tests / smoke pass; merge SHA agreed for publish pin
 
 ## Next skills

@@ -1,4 +1,7 @@
 name: mars-competitor-pulse
+labels:
+  marketplace.digitalocean.com/listing: competitor-pulse
+  marketplace.digitalocean.com/source: doctl
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb

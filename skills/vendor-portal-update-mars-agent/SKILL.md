@@ -13,7 +13,7 @@ Canonical flow: [AGENTS.md § Update flow](../../AGENTS.md#update-flow).
 ## Prerequisites
 
 - `AGENT_CREATE_TOKEN` with `vendor_portal:update` / `write`
-- **`appId`** for the agent (see AGENTS.md existing listings table)
+- **`appId`** for the agent — from `GET /apps` (match `safe_name` on the listing); not stored in AGENTS.md
 - No **pending** / **inReview** version blocking updates
 - Listing markdown merged to `main` (or use the branch file intentionally)
 

@@ -5,6 +5,9 @@
 # allows tools. The graph still stops for "Start repo audit?" and
 # "Open cleanup PR?"; approve those in the session.
 name: mars-nightly-repo-audit
+labels:
+  marketplace.digitalocean.com/listing: nightly-repo-audit
+  marketplace.digitalocean.com/source: doctl
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb

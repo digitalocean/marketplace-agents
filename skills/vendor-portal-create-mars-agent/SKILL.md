@@ -17,8 +17,9 @@ Canonical API notes: [AGENTS.md](../../AGENTS.md#marketplace-listing-api).
 - Merged (or agreed) **`FRAMEWORK_REPO_SHA`** on `main`
 - `AGENT_CREATE_TOKEN` with `vendor_portal:create` / `write` (never print or commit)
 - Emergency contact name + email
-- `listings/<slug>.md` and `specs/mars-<slug>.yaml` ready
+- `listings/<slug>.md` and `specs/mars-<slug>.yaml` ready (spec includes marketplace **`labels:`** — listing + source only)
 - Agent bootstrapped per **bootstrap-mars-agent**
+- After `POST /apps`, add the new row to AGENTS.md **Existing listings** table (`safe_name`, subdir). Keep returned `appId` in your private runbook or `GET /apps` — not in this repo
 
 Verify token is loaded (length only):
 
@@ -132,7 +133,7 @@ curl -sS -X POST "https://api.digitalocean.com/api/v1/vendor-portal/apps" \
   -d @payload.json
 ```
 
-Record returned `appId` and version in your runbook / AGENTS.md table if this is a new DO-owned agent.
+Record returned `appId` and version in a private runbook (not committed here). Add the listing row to AGENTS.md **Existing listings** (`safe_name`, subdir only).
 
 ## After create
 
@@ -141,4 +142,4 @@ Record returned `appId` and version in your runbook / AGENTS.md table if this is
 3. Sanity-check create-from-Marketplace (or doctl at the same SHA).
 4. Future copy/SHA updates: **vendor-portal-update-mars-agent**.
 
-Existing app IDs: [AGENTS.md § Existing listings](../../AGENTS.md#existing-listings-in-this-monorepo).
+Listing slugs: [AGENTS.md § Existing listings](../../AGENTS.md#existing-listings-in-this-monorepo). Resolve `appId` via `GET /apps`.
