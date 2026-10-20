@@ -95,6 +95,7 @@ Add [`specs/mars-<slug>.yaml`](./specs/) by copying an existing spec. Set at lea
 - `FRAMEWORK_SUBDIR` → `mars-<slug>`
 - Inference env + `HARNESS_INFERENCE_API_KEY` secret
 - Any agent-specific env, secrets, `tools`, or `permissions.rules` (see Nightly Repo Audit / Ghost Writer)
+- **`labels:`** — [analytics labels](#analytics-labels) (`listing` = `<slug>` / Vendor Portal `safe_name`, `source: doctl`)
 
 Prove the agent locally or with doctl before filing a Marketplace listing:
 
@@ -161,9 +162,29 @@ Wire the new row into the root [README.md](./README.md) agent table when you ope
 - [ ] Package is MIT-licensed (compatible with this repo)
 - [ ] `langgraph.json` registers **`agent`**
 - [ ] `requirements.txt` uses `-e ./mars-<slug>/`
-- [ ] `specs/mars-<slug>.yaml` present and doctl-createable
-- [ ] `listings/<slug>.md` has `## Summary` and `## Description`; optional top `logo:` + asset under `listings/assets/` uploaded via logo PUT → `customData.icon`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
+- [ ] `specs/mars-<slug>.yaml` doctl-createable with [analytics labels](#analytics-labels)
+- [ ] `listings/<slug>.md` — `## Summary`, `## Description`; filename equals Vendor Portal **`safe_name`** (do not rename after publish)
+- [ ] Optional top `logo:` + asset under `listings/assets/` uploaded via logo PUT → `customData.icon`; if it has `### Getting Started`, that section is sent as `gettingStarted` and is not part of `description`
 - [ ] Tests / smoke pass; PR merged (or SHA agreed) for the pin you will publish
+
+---
+
+## Analytics labels
+
+Optional manifest **labels** on each Agent Config tie sessions to a Marketplace listing in product analytics. The **Marketplace install UI** and **specs in this repo** must use the same keys (flat YAML `labels:`; stored as `metadata.labels` on the config).
+
+```yaml
+labels:
+  marketplace.digitalocean.com/listing: ghost-writer   # Vendor Portal safe_name
+  marketplace.digitalocean.com/source: doctl           # catalog UI installs use marketplace
+```
+
+| Key | Value |
+|-----|--------|
+| `marketplace.digitalocean.com/listing` | **`safe_name`** — same as `listings/<slug>.md` filename |
+| `marketplace.digitalocean.com/source` | `doctl` here; `marketplace` when the customer deploys from the catalog |
+
+Do not put Vendor Portal **app id** on configs. Resolve `appId` for API scripts via `GET /apps` (match on `safe_name`); do not commit app ids to this repo. **`FRAMEWORK_SUBDIR`** here is always `mars-<safe_name>` — analytics can infer `listing` from subdir for older configs that predate labels.
 
 ---
 
@@ -278,13 +299,15 @@ python3 scripts/upload_listing_logo.py <appId> listings/<slug>.md
 
 ### Existing listings in this monorepo
 
-| Agent | App ID | Safe name | Subdir |
-|-------|--------|-----------|--------|
-| Sourced Research Desk | `d8dfb7023b864e4eacc460f7` | `sourced-research-desk` | `mars-sourced-research-desk` |
-| Nightly Repo Audit | `814d8a64ff9c8bc30d8ca0af` | `nightly-repo-audit` | `mars-nightly-repo-audit` |
-| Competitor Pulse | `9557dfbccd5bafca7811aec2` | `competitor-pulse` | `mars-competitor-pulse` |
-| Ghost Writer | `4e4673e65050028cb571650a` | `ghost-writer` | `mars-ghost-writer` |
-| Box Doc Summarizer | `b817d1872667358d5664a253` | `box-doc-summarizer` | `mars-box-doc-summarizer` |
+**Safe name** is the catalog slug, the `listings/<slug>.md` filename, and the analytics **`listing`** label. **`FRAMEWORK_SUBDIR`** must stay `mars-{safe_name}`.
+
+| Agent | Safe name | `FRAMEWORK_SUBDIR` |
+|-------|-----------|---------------------|
+| Sourced Research Desk | `sourced-research-desk` | `mars-sourced-research-desk` |
+| Nightly Repo Audit | `nightly-repo-audit` | `mars-nightly-repo-audit` |
+| Competitor Pulse | `competitor-pulse` | `mars-competitor-pulse` |
+| Ghost Writer | `ghost-writer` | `mars-ghost-writer` |
+| Box Doc Summarizer | `box-doc-summarizer` | `mars-box-doc-summarizer` |
 
 ---
 

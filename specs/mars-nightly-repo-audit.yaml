@@ -5,6 +5,9 @@
 # Interactive sessions keep permissions.default: ask. A cron trigger
 # rejects that default; use specs/mars-nightly-repo-audit-trigger.yaml.
 name: mars-nightly-repo-audit
+labels:
+  marketplace.digitalocean.com/listing: nightly-repo-audit
+  marketplace.digitalocean.com/source: doctl
 agent: langgraph
 template: langgraph
 size: mv-2vcpu-4gb
